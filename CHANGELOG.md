@@ -5,6 +5,15 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Developer docs, part 1: a docs home by reader (`docs/README.md`); an architecture tour
+  (Protocols, the registry, the container, one chat request and one document through the code);
+  a glossary; a tutorial that adds a retriever end to end (its code is run by
+  `tests/unit/test_tutorial.py`); and the first four feature guides (sources and parsers,
+  chunking, background jobs, re-indexing), each with the same sections. Every relative link
+  and anchor in the Markdown docs is now checked by `tests/unit/test_docs_links.py`. Small fixes
+  found while writing them: `chatbot ingest` now uses `ingestion.worker.max_attempts` like the
+  API; the retriever example in `domain/__init__.py` and the registry docstring had the wrong
+  factory arguments.
 - License changed from MIT to the **Apache License 2.0** (`LICENSE`, new `NOTICE`,
   `pyproject.toml`, README). Apache 2.0 is as permissive for users and adds an explicit patent
   grant from contributors. Copies taken before this change stay under MIT.

@@ -3,7 +3,10 @@
 Implementations register themselves at import time::
 
     @registry.register("retriever", "dense")
-    def make_dense(ctx: BuildContext) -> Retriever: ...
+    def make_dense(embedder, store, alias, **kwargs) -> Retriever: ...
+
+Each kind is built with its own arguments (see the factories in ``core/container.py`` and
+``retrieval/pipeline.py``); ``chatbot.core.container.load_modules`` imports the built-ins.
 
 ``chatbot.domain`` is imported last, so your own code can override any name.
 """
