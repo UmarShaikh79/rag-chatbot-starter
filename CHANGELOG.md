@@ -5,6 +5,16 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- `.env.example` lists every variable the template reads, all without values: examples moved
+  into the comments, so a copied file never carries a placeholder such as a sample database
+  URL. Only `CHATBOT_PROFILE`, `OPENAI_API_KEY`, `CHATBOT_API_KEYS` and `DATABASE_URL` are
+  uncommented (an empty profile means `dev`); every optional feature's variables are commented
+  until used. Added what was missing: `OTEL_RESOURCE_ATTRIBUTES`, `OLLAMA_API_KEY` (example
+  name), `CHATBOT__AUTH__JWT__HS256_SECRET_ENV`, `CHATBOT__GUARDRAILS__PII__DETECTORS`,
+  `CHATBOT_ROOT`, and the test switches `TEST_DATABASE_URL`, `QDRANT_TEST_URL`,
+  `OLLAMA_TEST_URL`, `RUN_LIVE_TESTS`. `tests/unit/test_env_example.py` now also finds
+  `os.environ` reads in `src` and `tests`, and fails on any value or extra uncommented line.
+  In a copy you have modified: compare your `.env` with the new file; nothing in it changes.
 - Fix: a missing `OPENAI_API_KEY` crashed `chatbot serve`, `chatbot worker` and the CLI with the
   OpenAI SDK's 20-line traceback ("Missing credentials"). Missing keys are now one message
   before anything starts, e.g. `Missing API key(s) for the 'dev' profile: OPENAI_API_KEY needed
