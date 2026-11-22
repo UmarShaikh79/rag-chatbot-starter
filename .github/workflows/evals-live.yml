@@ -35,7 +35,7 @@ jobs:
       - name: Skip without a key
         if: env.OPENAI_API_KEY == ''
         run: echo "No OPENAI_API_KEY secret; nothing to do."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.OPENAI_API_KEY != ''
       - uses: astral-sh/setup-uv@v6
         if: env.OPENAI_API_KEY != ''
