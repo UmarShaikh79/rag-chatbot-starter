@@ -17,7 +17,7 @@ import secrets
 import httpx
 from fastapi import HTTPException, Request, status
 
-from chatbot.auth.jwt import JwtVerifier, TokenError, looks_like_jwt
+from chatbot.auth.jwt import JwtVerifier, KeysUnavailable, TokenError, looks_like_jwt
 from chatbot.auth.principal import ANONYMOUS, Principal
 from chatbot.core.settings import AuthSection
 
@@ -87,6 +87,13 @@ class Authenticator:
             except TokenError as exc:
                 log.info("token rejected", extra={"reason": str(exc)})
                 raise self._unauthorized(str(exc)) from None
+            except KeysUnavailable as exc:
+                log.warning("token not checked", extra={"reason": str(exc)})
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=str(exc),
+                    headers={"Retry-After": "30"},
+                ) from None
         raise self._unauthorized("invalid or missing credentials")
 
     async def __call__(self, request: Request) -> None:

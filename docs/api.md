@@ -23,7 +23,9 @@ an API key or the admin scope. Interactive docs are served at `/docs`.
 
 Errors return `{"detail": "...", "trace_id": "..."}`: 401 bad key or token, 403 conversation
 owned by another user (or a JWT user reaching for another user or an admin route), 404 unknown
-source/job/document/fact, 409 index built with a different embedding model, 422 invalid body.
+source/job/document/fact, 409 index built with a different embedding model, 422 invalid body,
+503 a token could not be checked because the identity provider's signing keys could not be
+fetched (with `Retry-After`; not a sign-out).
 
 ## POST /v1/chat
 

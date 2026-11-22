@@ -11,6 +11,9 @@ Keycloak, Cognito, Google, ...) signs users in and sends their access token here
 - only the configured ``algorithms`` (``none`` is never accepted; HS256 only with a secret);
 - ``required_scopes`` from the ``scope`` (space-separated) or ``scp`` claims.
 
+If the keys can't be fetched (provider down, nothing cached yet) ``KeysUnavailable`` is raised
+and the API answers 503 with ``Retry-After``.
+
 The user ID comes from ``user_id_claim`` (``sub``), so callers can't pick another user's ID.
 """
 
@@ -33,6 +36,14 @@ _MIN_REFRESH_S = 30.0  # never refetch the JWKS more often than this on unknown 
 
 class TokenError(Exception):
     """The token is missing, malformed, expired or not trusted. The message is safe to log."""
+
+
+class KeysUnavailable(Exception):
+    """The identity provider's signing keys could not be fetched, so no token can be checked.
+
+    Not the caller's fault: the API answers 503, not 401, because many front ends sign the
+    user out on a 401 and an identity-provider outage would sign everyone out.
+    """
 
 
 def scopes_of(claims: dict[str, Any]) -> frozenset[str]:
@@ -125,7 +136,7 @@ class JwtVerifier:
             if kid not in self._keys:
                 await self._refresh(force=True)  # the provider may have rotated its keys
         except httpx.HTTPError as exc:
-            raise TokenError("could not fetch the identity provider's signing keys") from exc
+            raise KeysUnavailable("could not fetch the identity provider's signing keys") from exc
         key = self._keys.get(kid)
         if key is None and not kid and len(self._keys) == 1:
             key = next(iter(self._keys.values()))

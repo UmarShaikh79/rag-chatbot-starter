@@ -30,6 +30,7 @@ class FakeIdp:
     def __init__(self) -> None:
         self.keys: dict[str, rsa.RSAPrivateKey] = {}
         self.requests: list[str] = []
+        self.down = False  # True: every request fails as if the provider were unreachable
         self.rotate()
 
     def rotate(self) -> str:
@@ -47,6 +48,8 @@ class FakeIdp:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request.url.path)
+        if self.down:
+            raise httpx.ConnectError("connection refused", request=request)
         if request.url.path == "/.well-known/openid-configuration":
             return httpx.Response(
                 200, json={"issuer": ISSUER, "jwks_uri": "https://idp.example.com/jwks"}
@@ -214,6 +217,28 @@ def test_both_credentials_work(api):
     assert api.get("/v1/sources", headers={"X-API-Key": "wrong"}).status_code == 401
     resp = api.get("/v1/sources", headers=bearer(api.idp.token(aud="x")))
     assert resp.status_code == 401 and resp.headers["www-authenticate"] == "Bearer"
+    # Auth errors carry the trace ID like every other error (docs/api.md).
+    assert resp.json()["trace_id"] == resp.headers["x-trace-id"]
+
+
+def test_end_user_refusals_carry_the_trace_id(api):
+    resp = api.get("/v1/sources", headers=bearer(api.idp.token(sub="alice")))
+    assert resp.status_code == 403 and resp.json()["trace_id"] == resp.headers["x-trace-id"]
+
+
+def test_identity_provider_down_is_503_not_401(api):
+    """Nothing cached and the provider unreachable: the token can't be checked, which is not
+    the caller's fault. A 401 would make many front ends sign the user out."""
+    token = bearer(api.idp.token(sub="alice"))
+    api.idp.down = True
+    resp = api.post("/v1/chat", json={"message": "refund window?"}, headers=token)
+    assert resp.status_code == 503 and resp.headers["retry-after"] == "30"
+    assert "signing keys" in resp.json()["detail"] and resp.json()["trace_id"]
+    key = {"X-API-Key": api.key}
+    assert api.post("/v1/chat", json={"message": "hi"}, headers=key).status_code == 200
+    api.idp.down = False
+    resp = api.post("/v1/chat", json={"message": "refund window?"}, headers=token)
+    assert resp.status_code == 200
 
 
 def test_end_users_chat_as_themselves(api):
