@@ -24,8 +24,13 @@ an API key or the admin scope. Interactive docs are served at `/docs`.
 Errors return `{"detail": "...", "trace_id": "..."}`: 401 bad key or token, 403 conversation
 owned by another user (or a JWT user reaching for another user or an admin route), 404 unknown
 source/job/document/fact, 409 index built with a different embedding model, 422 invalid body,
-503 a token could not be checked because the identity provider's signing keys could not be
-fetched (with `Retry-After`; not a sign-out).
+500 something failed inside the service (`detail` is the template's own message, or
+`internal error`), 502 a model, embedding or rerank provider failed after its retries
+(`detail` says which kind; SDK messages are not repeated because they can contain part of an
+API key), 503 a token could not be checked because the identity provider's signing keys could
+not be fetched (with `Retry-After`; not a sign-out). Every one has the `X-Trace-Id` header; the
+log line with the same trace ID has the full error. A streamed request reports the same
+`detail` in its `error` event.
 
 ## POST /v1/chat
 

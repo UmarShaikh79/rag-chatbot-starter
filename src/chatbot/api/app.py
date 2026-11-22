@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -18,7 +19,13 @@ from chatbot.api.routes import chat, health, ingest, memory, usage
 from chatbot.auth.api_key import Authenticator
 from chatbot.auth.principal import require_admin
 from chatbot.core import container
-from chatbot.core.errors import ForbiddenError, IndexMismatchError, NotFoundError
+from chatbot.core.errors import (
+    ChatbotError,
+    ForbiddenError,
+    IndexMismatchError,
+    NotFoundError,
+    describe_error,
+)
 from chatbot.core.settings import Settings, get_settings
 from chatbot.db import make_pool
 from chatbot.observability.logging import configure_logging, get_trace_id
@@ -115,5 +122,23 @@ def create_app(
     @app.exception_handler(IndexMismatchError)
     async def _mismatch(_: Request, exc: IndexMismatchError) -> JSONResponse:
         return error(409, str(exc))
+
+    # Any other failure of ours or of a provider: 502 when the provider failed (the request
+    # was fine), 500 otherwise, with a message safe to show (describe_error). Anything not
+    # handled here becomes a JSON 500 in TraceMiddleware.
+    async def _failed(_: Request, exc: Exception) -> JSONResponse:
+        status, message = describe_error(exc)
+        log.error("request failed", exc_info=exc, extra={"status": status})
+        return error(status, message)
+
+    provider_errors: list[type[Exception]] = [ChatbotError, httpx.HTTPError]
+    try:
+        from openai import OpenAIError
+
+        provider_errors.append(OpenAIError)
+    except ImportError:
+        pass
+    for kind in provider_errors:
+        app.add_exception_handler(kind, _failed)
 
     return app

@@ -22,7 +22,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from chatbot.core.errors import ChatbotError
+from chatbot.core.errors import ChatbotError, describe_error
 from chatbot.core.interfaces import LLM, MemoryStore, Retriever
 from chatbot.core.prompts import PromptRegistry, PromptTemplate
 from chatbot.core.registry import registry
@@ -104,7 +104,7 @@ class SimpleOrchestrator:
                 yield event
         except Exception as exc:
             log.exception("chat stream failed")
-            message = str(exc) if isinstance(exc, ChatbotError) else "internal error"
+            _, message = describe_error(exc)  # the same message a non-streamed request gets
             yield ChatEvent(event="error", data={"message": message, "trace_id": get_trace_id()})
 
     # ------------------------------------------------------------------ helpers

@@ -5,6 +5,15 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: a non-streamed chat whose model or embedding provider failed (OpenAI down, a bad key,
+  Ollama without the model) answered Starlette's plain-text `500 Internal Server Error`, with no
+  `trace_id`, unlike every other error. Failures now answer JSON `{"detail", "trace_id"}` with
+  `X-Trace-Id`: 502 when a provider failed (`ProviderError`, which `OllamaError` and
+  `RerankError` now extend, and `httpx`/OpenAI SDK errors), 500 for the template's own errors
+  and, from `TraceMiddleware`, anything unexpected (`internal error`). SDK messages are not
+  shown, since an OpenAI 401 repeats part of the key. Streams report the same message
+  (`describe_error` in `core/errors.py`). In a copy you have modified: take `describe_error`,
+  the `_failed` handler in `api/app.py` and the `except` block in `TraceMiddleware`.
 - Fix: a reranker failure took every chat request down. With a Cohere trial key (10 calls a
   minute) or during a Cohere outage, `/v1/chat` answered 500 for everyone. Now:
   - the Cohere reranker retries 429, 5xx, timeouts and connection errors (twice within about

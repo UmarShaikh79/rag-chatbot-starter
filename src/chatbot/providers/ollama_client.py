@@ -18,12 +18,12 @@ from typing import Any
 
 import httpx
 
-from chatbot.core.errors import ChatbotError
+from chatbot.core.errors import ProviderError
 
 DEFAULT_BASE_URL = "http://localhost:11434"
 
 
-class OllamaError(ChatbotError):
+class OllamaError(ProviderError):
     """Ollama answered with an error (model not pulled, server down, bad request)."""
 
 
