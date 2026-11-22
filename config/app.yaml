@@ -1,0 +1,90 @@
+# Main configuration. Profiles in config/profiles/ override this file, and
+# environment variables override both: CHATBOT__RETRIEVAL__TOP_K=5.
+# Secrets never live here; only the *names* of env vars that hold them.
+# Unknown keys fail startup with the exact path (see src/chatbot/core/settings.py).
+
+app:
+  name: rag-chatbot
+  env: dev                          # dev | prod
+
+auth:
+  mode: api_key                     # none | api_key
+  api_keys_env: CHATBOT_API_KEYS    # comma-separated SHA-256 hashes; `chatbot hash-key` makes one
+
+models:                             # names point into config/models.yaml
+  answer: openai:answer
+  cheap: openai:cheap
+  embed: openai:text-embedding-3-small
+
+database:
+  url_env: DATABASE_URL             # postgresql://user:pass@host:5432/db
+  pool_min: 1
+  pool_max: 10
+
+vector_store:
+  backend: pgvector
+  index: docs                       # alias; the physical index records embed model + dims (ADR 005)
+  distance: cosine
+  hnsw:                             # ADR 012; needs pgvector >= 0.8
+    m: 16
+    ef_construction: 64
+    ef_search: 100
+    iterative_scan: relaxed_order   # off | strict_order | relaxed_order
+    max_scan_tuples: 20000
+  exact_scan_threshold: 2000        # filters matching <= this many chunks skip HNSW and scan exactly
+
+ingestion:
+  sources:
+    - name: samples
+      type: files
+      path: samples/docs
+      include: ["*.pdf", "*.md", "*.docx", "*.html", "*.txt"]
+  chunker:
+    type: recursive
+    size_tokens: 512
+    overlap_tokens: 64
+    tokenizer: approx               # approx (chars/4, no downloads) | tiktoken (needs the tiktoken package)
+  embed_batch_size: 64
+  worker:
+    concurrency: 2
+    max_attempts: 3
+    poll_interval_s: 1.0
+    lock_timeout_s: 600             # a job locked longer than this is considered abandoned
+
+retrieval:
+  strategy: dense                   # dense (M1); bm25 | hybrid come in M3
+  top_k: 8
+  min_score: 0.35                   # provisional; calibrated per embedding model in M3 (ADR 011)
+  min_hits: 1                       # always paired with min_score
+  thresholds_from: index            # index | config; calibrated values stored with the index win
+
+answer:
+  prompt: answer/v1
+  clarify_prompt: clarify/v1
+  max_context_chunks: 6
+  citations: required               # required | optional
+  on_weak_retrieval: clarify        # clarify | refuse
+  stream_mode: draft_then_final     # draft_then_final | buffered (ADR 014)
+
+memory:
+  backend: postgres
+  history_turns: 10
+  redact_before_persist: true       # ADR 015
+
+guardrails:
+  input:
+    max_chars: 4000
+    pii_redaction: true
+    injection_check: true
+  context:
+    injection_check: true           # drop retrieved chunks that look like instructions
+  output:
+    pii_redaction: true
+  stream_holdback_chars: 64         # rolling buffer so PII is never split across SSE events
+
+observability:
+  log_level: INFO
+  log_format: json                  # json | text
+  log_message_text: false           # never log user or model text unless you turn this on
+
+orchestrator: simple

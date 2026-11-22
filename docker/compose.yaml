@@ -1,0 +1,61 @@
+# Local stack: Postgres + pgvector, a one-shot migration, the API and the worker.
+#   docker compose -f docker/compose.yaml --env-file .env up --build
+# (or just `make up`)
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  env_file: ../.env
+  environment:
+    DATABASE_URL: postgresql://chatbot:chatbot@postgres:5432/chatbot
+  depends_on:
+    postgres:
+      condition: service_healthy
+  volumes:
+    - ../samples:/app/samples:ro   # edit sample docs without rebuilding
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17   # ADR 012 needs pgvector >= 0.8
+    environment:
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot
+      POSTGRES_DB: chatbot
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro   # also creates chatbot_test for `make test-db`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbot -d chatbot"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *app
+    command: ["chatbot", "migrate"]
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["chatbot", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["8000:8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: ["chatbot", "worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
