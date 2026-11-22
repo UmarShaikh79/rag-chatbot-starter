@@ -6,7 +6,7 @@
 without making things up.** Clone it, own it, change anything.
 
 [![CI](https://github.com/UmarShaikh79/rag-chatbot-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/UmarShaikh79/rag-chatbot-starter/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688)
 ![pgvector](https://img.shields.io/badge/pgvector-0.8-336791)
@@ -400,5 +400,7 @@ you, it confuses others too. Start with [CONTRIBUTING.md](CONTRIBUTING.md); plea
 
 ## License
 
-[MIT](LICENSE). The sample documents describe a fictional product and were written for this
-repository.
+[Apache License 2.0](LICENSE): use it, change it and ship it, commercially too. Keep the license
+and the [NOTICE](NOTICE) file with copies, and say which files you changed. It also grants a
+patent licence from contributors. The sample documents describe a fictional product and were
+written for this repository.

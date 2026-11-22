@@ -5,6 +5,9 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- License changed from MIT to the **Apache License 2.0** (`LICENSE`, new `NOTICE`,
+  `pyproject.toml`, README). Apache 2.0 is as permissive for users and adds an explicit patent
+  grant from contributors. Copies taken before this change stay under MIT.
 - README rewritten for first-time readers: real answers from the sample corpus (with citations,
   a clarifying question, PII redaction, an injection refusal, streaming), a zero-key quick start
   checked against `.env.example`, a feature overview, measured quality per setup, a diagram of

@@ -3,7 +3,7 @@ name = "rag-chatbot-starter"
 version = "0.5.0"
 description = "Clone-and-own boilerplate for a config-driven RAG chatbot backend (FastAPI, Postgres, pgvector)."
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
