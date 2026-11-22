@@ -213,6 +213,7 @@ After cloning, the usual first steps:
 - [Operating pgvector: tuning, autovacuum, HNSW rebuilds](docs/operations/pgvector.md)
 - [Roadmap](docs/roadmap.md)
 - [Architecture decision records](docs/adr/README.md)
+- [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md)
 
 ## License
 

@@ -7,6 +7,12 @@ app:
   name: rag-chatbot
   env: dev                          # dev | prod
 
+api:
+  docs: true                        # serve /docs, /redoc and /openapi.json
+  cors:                             # browsers calling the API from another domain
+    allow_origins: []               # e.g. [https://app.example.com]; [] = off; ["*"] = any
+    allow_credentials: false        # cookies; not needed for Authorization headers
+
 auth:
   mode: api_key                     # none | api_key | jwt | api_key_or_jwt (ADR 017)
   api_keys_env: CHATBOT_API_KEYS    # comma-separated SHA-256 hashes; `chatbot hash-key` makes one

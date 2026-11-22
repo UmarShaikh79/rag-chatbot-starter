@@ -5,6 +5,19 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Ready to go public:
+  - New `api` settings: `api.cors` lets browser apps on listed origins call the API directly
+    (off by default; preflights are answered before auth, and error responses carry the CORS
+    headers so the app sees a 401 rather than a CORS error); `api.docs` turns `/docs`, `/redoc`
+    and `/openapi.json` off. ADR 017 described single-page apps calling the API with their
+    token, which browsers blocked without CORS.
+  - `CONTRIBUTING.md` (setup, checks, how to send a change, code style for a mixed audience),
+    `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), issue and pull
+    request templates.
+  - Workflows run with a read-only token (`permissions: contents: read`); Dependabot opens
+    weekly updates for Python (uv), GitHub Actions and the Docker base image.
+  In a copy you have modified: nothing to do; add `api.cors.allow_origins` if a browser app
+  calls your API.
 - Fix: known limitations from the testing pass.
   - Golden set: q17 ("Does Tidepool have a Linux desktop app?") was labelled unanswerable, but
     the docs list every platform the app runs on, so "No, not Linux" is grounded. It is now
