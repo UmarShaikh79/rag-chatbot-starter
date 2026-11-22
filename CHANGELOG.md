@@ -5,6 +5,11 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Dependabot no longer proposes a new Python version for the Docker base image. Its first run
+  proposed 3.12 -> 3.15, which CI passed (CI runs 3.12 and doesn't build the image) but which
+  breaks the image with the `presidio`, `qdrant` and `langgraph` extras (no 3.15 wheels for
+  `preshed`, `numpy` 2.4.6, `zstandard`). Move the Dockerfile and CI's `python-version`
+  together, by hand.
 - Ready to go public:
   - New `api` settings: `api.cors` lets browser apps on listed origins call the API directly
     (off by default; preflights are answered before auth, and error responses carry the CORS
