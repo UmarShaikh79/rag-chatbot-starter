@@ -48,7 +48,7 @@ jobs:
           uv run chatbot ingest --inline
           uv run chatbot calibrate --apply
           uv run chatbot eval --out eval-report.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && env.OPENAI_API_KEY != ''
         with:
           name: eval-report-live
