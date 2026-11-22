@@ -3,6 +3,14 @@
 This is a template you copy and own (ADR 001). Each entry lists what changed and, when it
 matters, how to bring the change into a copy you have already modified.
 
+## Unreleased
+
+- Fix: the Docker image now includes `evals/`. Before, `chatbot calibrate` and `chatbot eval`
+  failed inside a container (`FileNotFoundError: /app/evals/datasets/golden.jsonl`), so an
+  image-only deployment (Compose without uv on the host, Kubernetes) could not calibrate its
+  thresholds. A unit test checks that the Dockerfile copies every folder the app reads at
+  runtime. In a copy you have modified: add `COPY evals ./evals` to `docker/Dockerfile`.
+
 ## 0.5.0: milestone 5
 
 Observability, cost accounting, an optional LangGraph orchestrator and a Kubernetes example.

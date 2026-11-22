@@ -19,6 +19,12 @@ All of them use the active profile (`CHATBOT_PROFILE`) and an already ingested i
 runs keep conversations and memory jobs in memory, so they leave nothing in your database;
 `calibrate --apply` writes one row to `retrieval_calibrations`.
 
+The Docker image includes this folder, so the same commands run in a container:
+`docker compose -f docker/compose.yaml exec api chatbot calibrate --apply`, or
+`kubectl -n <namespace> exec deploy/chatbot-api -- chatbot calibrate --apply` on Kubernetes. The dataset is
+the one baked into the image: rebuild after editing it. `--update-baseline` writes inside the
+container, so run it on your machine (`uv run`) to get a file you can commit.
+
 ## Metrics
 
 | metric | meaning |
