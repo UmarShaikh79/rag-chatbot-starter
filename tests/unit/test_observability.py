@@ -364,3 +364,19 @@ async def test_rerank_is_its_own_span_and_a_fallback_is_marked(otel):
     assert "rerank_unavailable" in resp.warnings
     points = metric_points(otel.reader)
     assert sum(p.value for p in points["chatbot.rerank.fallbacks"]) == 1
+
+
+def test_failed_spans_carry_no_credentials(otel):
+    """Span status and the exception event go to Jaeger, Tempo or Langfuse."""
+    exporter = otel.exporter
+    try:
+        with tracing.span("call"):
+            raise RuntimeError("Incorrect API key provided: sk-inval**********************wxyz")
+    except RuntimeError:
+        pass
+    span = spans_by_name(exporter)["call"]
+    assert "wxyz" not in span.status.description and "[redacted]" in span.status.description
+    event = next(e for e in span.events if e.name == "exception")
+    assert "wxyz" not in event.attributes["exception.message"]
+    assert "wxyz" not in event.attributes["exception.stacktrace"]
+    assert "RuntimeError" in event.attributes["exception.stacktrace"]

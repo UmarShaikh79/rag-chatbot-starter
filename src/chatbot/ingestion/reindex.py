@@ -28,7 +28,7 @@ import logging
 
 from pydantic import BaseModel
 
-from chatbot.core.errors import ChatbotError
+from chatbot.core.errors import ChatbotError, error_text
 from chatbot.core.interfaces import IndexAdmin, Source, VectorStore
 from chatbot.core.types import IndexInfo
 from chatbot.ingestion.pipeline import IngestionPipeline, IngestReport
@@ -112,7 +112,7 @@ async def _fill(
         try:
             await pipeline.ingest_parsed(new, stored.document, result.stored, stored.user_id)
         except ValueError as exc:
-            result.stored.failed[stored.id] = f"{type(exc).__name__}: {exc}"
+            result.stored.failed[stored.id] = error_text(exc)
     # Deleted from the live index while we were building: delete here too.
     async for stored in admin.iter_documents(new, configured):
         if stored.id not in seen:

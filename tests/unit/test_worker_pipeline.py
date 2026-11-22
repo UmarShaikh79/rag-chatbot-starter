@@ -40,6 +40,23 @@ async def test_permanent_errors_are_not_retried():
     assert job.status == "failed" and "403" in job.last_error
 
 
+async def test_job_errors_keep_no_key_fragments():
+    """last_error is returned by GET /v1/jobs/{id}; OpenAI's 401 repeats part of the key."""
+    queue = InMemoryJobQueue()
+
+    async def bad_key(job):
+        raise RuntimeError(
+            "Error code: 401 - Incorrect API key provided: sk-inval**********************wxyz."
+        )
+
+    job_id = await queue.enqueue("embed", {}, max_attempts=1)
+    await Worker(queue, {"embed": bad_key}).drain()
+    job = await queue.get(job_id)
+    assert (
+        job.last_error == "RuntimeError: Error code: 401 - Incorrect API key provided: [redacted]."
+    )
+
+
 async def test_rate_limits_are_still_retried():
     queue = InMemoryJobQueue()
     calls = []
