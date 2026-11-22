@@ -38,6 +38,26 @@ def _is_probe(scope: Any) -> bool:
     return scope.get("type") == "http" and scope.get("path") in UNTRACED
 
 
+def _add_cors(app: FastAPI, settings: Settings) -> None:
+    """Let browser apps on the listed origins call the API (api.cors). Added last, so it is
+    the outermost layer: preflight requests are answered before auth, and error responses
+    carry the CORS headers too (otherwise the browser hides them from the app)."""
+    cors = settings.api.cors
+    if not cors.allow_origins:
+        return
+    from starlette.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors.allow_origins,
+        allow_credentials=cors.allow_credentials,
+        allow_methods=cors.allow_methods,
+        allow_headers=cors.allow_headers,
+        expose_headers=cors.expose_headers,
+        max_age=cors.max_age_s,
+    )
+
+
 def _fastapi_telemetry() -> dict[str, Any]:
     """FastAPI 0.165+ traces and meters requests itself once an OpenTelemetry provider exists
     (ADR 026 sets one). TraceMiddleware already owns the server span (continuing
@@ -81,14 +101,19 @@ def create_app(
                 await app.state.components.close()
                 shutdown_telemetry()
 
+    docs = settings.api.docs
     app = FastAPI(
         title=settings.app.name,
         version=__version__,
         lifespan=lifespan,
         description="RAG chatbot backend. Integrate from any stack over HTTP/SSE.",
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
         **_fastapi_telemetry(),
     )
     app.add_middleware(TraceMiddleware)
+    _add_cors(app, settings)
     protected = [Depends(auth)]
     # End users signed in with a JWT can chat and manage their own memory; ingestion,
     # documents and jobs need an API key or a token with the admin scope.

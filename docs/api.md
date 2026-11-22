@@ -4,7 +4,12 @@ All `/v1` routes need credentials unless `auth.mode: none`: an API key (`X-API-K
 `Authorization: Bearer <key>`) or, in the JWT modes, a token (`Authorization: Bearer <jwt>`).
 API keys can call every route for any user. A JWT end user always acts as the token's subject
 and can only use chat and their own memory routes; ingestion, jobs, sources and documents need
-an API key or the admin scope. Interactive docs are served at `/docs`.
+an API key or the admin scope. Interactive docs are served at `/docs` (`api.docs`).
+
+Calling it from a browser app on another domain (React, Vue, ...)? List that origin in
+`api.cors.allow_origins` (see `docs/configuration.md`, `api`); otherwise the browser blocks the
+requests. Server-side callers and mobile apps don't need it. Don't put an API key in browser
+code: use a JWT from your identity provider, or call the API from your own backend.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

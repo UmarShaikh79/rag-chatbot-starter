@@ -1,0 +1,23 @@
+name: Feature or improvement
+description: Suggest something new, or a clearer way to do something.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or use case, in your own words. "I'm building ... and need ..."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: Your idea, if you have one. Alternatives you considered are welcome too.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Fits the template?
+      description: This is a backend template you copy and own, not a framework (ADR 001).
+      options:
+        - label: It could be optional (a config switch or a `uv` extra), not required for everyone

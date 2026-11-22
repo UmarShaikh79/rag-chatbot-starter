@@ -23,6 +23,19 @@ them (`OPENAI_API_KEY`, `CHATBOT_API_KEYS`, `DATABASE_URL`).
 
 ## Sections
 
+### `api`
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `docs` | `true` | Serve `/docs`, `/redoc` and `/openapi.json`. Turn off where you don't want the API described publicly. |
+| `cors.allow_origins` | `[]` (off) | Browser apps on these origins may call the API, e.g. `[https://app.example.com]`. `["*"]` allows any origin. Servers and mobile apps don't need CORS. |
+| `cors.allow_credentials` | `false` | Allow cookies. Tokens in the `Authorization` header don't need it. Can't be combined with `["*"]`. |
+| `cors.allow_methods` / `allow_headers` | `GET, POST, DELETE, OPTIONS` / `Authorization, Content-Type, X-API-Key, X-Request-Id, traceparent` | What a browser may send. |
+| `cors.expose_headers` | `[X-Trace-Id]` | Response headers browser code may read. |
+| `cors.max_age_s` | 600 | How long a browser caches the preflight answer. |
+
+From the environment: `CHATBOT__API__CORS__ALLOW_ORIGINS='[https://app.example.com]'`.
+
 ### `models` and `config/models.yaml`
 
 `models.answer`, `models.cheap` and `models.embed` name entries in `models.yaml`. Each LLM entry

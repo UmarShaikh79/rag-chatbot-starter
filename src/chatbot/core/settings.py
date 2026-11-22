@@ -30,6 +30,38 @@ class AppSection(Strict):
     env: Literal["dev", "prod"] = "dev"
 
 
+class CorsOptions(Strict):
+    """Cross-origin requests from browsers (a React or Vue app on another domain calling the
+    API directly). Off until you list origins. Servers and mobile apps don't need it."""
+
+    allow_origins: list[str] = []  # e.g. ["https://app.example.com"]; ["*"] allows any
+    allow_credentials: bool = False  # cookies; tokens in the Authorization header don't need it
+    allow_methods: list[str] = ["GET", "POST", "DELETE", "OPTIONS"]
+    allow_headers: list[str] = [
+        "Authorization",
+        "Content-Type",
+        "X-API-Key",
+        "X-Request-Id",
+        "traceparent",
+    ]
+    expose_headers: list[str] = ["X-Trace-Id"]  # readable by browser code
+    max_age_s: int = Field(600, ge=0)  # how long a browser caches the preflight answer
+
+    @model_validator(mode="after")
+    def _wildcard_without_credentials(self) -> CorsOptions:
+        if "*" in self.allow_origins and self.allow_credentials:
+            raise ValueError(
+                "api.cors: allow_origins ['*'] can't be combined with allow_credentials "
+                "(browsers refuse it); list your origins instead"
+            )
+        return self
+
+
+class ApiSection(Strict):
+    cors: CorsOptions = CorsOptions()
+    docs: bool = True  # serve /docs, /redoc and /openapi.json
+
+
 class JwtSection(Strict):
     """Bearer tokens from any OIDC provider (Auth0, Okta, Entra ID, Keycloak, Cognito, ...)."""
 
@@ -500,6 +532,7 @@ class ModelCatalog(Strict):
 
 class Settings(Strict):
     app: AppSection = AppSection()
+    api: ApiSection = ApiSection()
     auth: AuthSection = AuthSection()
     models: ModelsSection
     database: DatabaseSection = DatabaseSection()
