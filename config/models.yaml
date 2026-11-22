@@ -22,6 +22,8 @@ llm:
     price_per_mtok: {input: 0.10, output: 0.50}
   # Local models through Ollama (config/profiles/local-ollama.yaml). Pull them first:
   #   ollama pull qwen3.5:9b && ollama pull gemma3:4b && ollama pull nomic-embed-text
+  # Tested on 2026-11-22 with Ollama 0.40.17 (Apple M1, 16 GB): about 11 GB of downloads;
+  # both chat models do not fit in memory together, so Ollama swaps them (6-7 s each).
   # Tags read from https://ollama.com/library and a Sept 2026 ranking
   # (https://www.morphllm.com/best-ollama-models) on 2026-11-22; pick what fits your
   # hardware. qwen3.5:9b needs ~7 GB of memory, gemma3:4b ~3.5 GB.

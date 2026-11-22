@@ -11,9 +11,10 @@ vector_store:
   # alias to the local model instead, keep the alias and run `chatbot reindex` (ADR 023).
   index: docs_local
 retrieval:
-  # Provisional, a guess for nomic-embed-text cosine scores (ADR 011): run
-  # `chatbot calibrate --apply` after ingesting; the calibrated values replace these.
-  min_score: 0.5
+  # Provisional (ADR 011): run `chatbot calibrate --apply` after ingesting; the calibrated
+  # values replace these. On the sample corpus nomic-embed-text calibrated to 0.676 with
+  # min_hits 1 (2026-11-22); 0.5 let almost every off-topic question through.
+  min_score: 0.65
   min_hits: 1
 observability:
   log_format: text

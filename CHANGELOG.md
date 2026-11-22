@@ -17,6 +17,13 @@ matters, how to bring the change into a copy you have already modified.
   Calibrated thresholds for `text-embedding-3-small` on the sample corpus:
   `min_score 0.409`, `min_hits 1`. In a copy you have modified: copy the prices, and record
   your own baseline with `chatbot eval --update-baseline` on your corpus.
+- First live run of the `local-ollama` profile (Ollama 0.40.17 on an Apple M1, 16 GB).
+  `evals/gate.yaml` gains a `local-ollama` gate (same floors as `dev`), and
+  `evals/baselines/local-ollama.json` records the run: hit@1 1.0, answer rate 1.0,
+  faithfulness 1.0, unanswerable rate 0.9, p50 latency about 22 s. `nomic-embed-text`
+  calibrated to `min_score 0.676`, so the profile's provisional `min_score` goes from 0.5 to
+  0.65. In a copy you have modified: raise `retrieval.min_score` in
+  `config/profiles/local-ollama.yaml`, or run `chatbot calibrate --apply`.
 
 ## 0.5.0: milestone 5
 
