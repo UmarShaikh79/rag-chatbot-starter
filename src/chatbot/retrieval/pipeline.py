@@ -16,6 +16,7 @@ scorer, so changing any step falls back to the provisional thresholds until you 
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from chatbot.core.interfaces import (
@@ -30,10 +31,16 @@ from chatbot.core.prompts import PromptRegistry
 from chatbot.core.registry import registry
 from chatbot.core.settings import Settings
 from chatbot.core.types import Calibration, IndexInfo, ScoredChunk, Usage
+from chatbot.observability.tracing import count, span
+from chatbot.providers.rerankers import is_patient
 from chatbot.retrieval.hybrid import HybridRetriever
 from chatbot.retrieval.hyde import HydeRetriever
 
 log = logging.getLogger(__name__)
+
+# Set when this turn's rerank failed and the retrieval order was kept. Per task, so concurrent
+# requests sharing one pipeline don't see each other's failures.
+_fell_back: ContextVar[bool] = ContextVar("rerank_fell_back", default=False)
 
 
 class RetrievalPipeline:
@@ -46,12 +53,16 @@ class RetrievalPipeline:
         gate: str = "dense",
         reranker: Reranker | None = None,
         rerank_candidates: int = 20,
+        fallback: RetrievalPipeline | None = None,
     ) -> None:
         self.retriever = retriever
         self.store = store
         self.gate = gate
         self.reranker = reranker
         self.rerank_candidates = rerank_candidates
+        # The same retrieval without the reranker: its gate, scorer and calibration judge a
+        # turn whose rerank failed. None: a rerank failure fails the request.
+        self.fallback = fallback
 
     @property
     def signature(self) -> str:
@@ -77,12 +88,37 @@ class RetrievalPipeline:
     async def retrieve(
         self, query: str, k: int, filters: dict[str, Any]
     ) -> tuple[list[ScoredChunk], Usage]:
+        _fell_back.set(False)
         n = max(k, self.rerank_candidates) if self.reranker is not None else k
         hits, usage = await self.retriever.retrieve(query, n, filters)
         if self.reranker is not None and hits:
-            hits, rerank_usage = await self.reranker.rerank(query, hits, k)
+            attrs = {
+                "chatbot.rerank.model": self.reranker.signature,
+                "chatbot.rerank.candidates": len(hits),
+                "chatbot.rerank.top_n": k,
+            }
+            with span("rerank", attrs=attrs) as s:
+                try:
+                    hits, rerank_usage = await self.reranker.rerank(query, hits, k)
+                except Exception as exc:
+                    if self.fallback is None or is_patient():
+                        raise
+                    s.fail(exc)
+                    s.set({"chatbot.rerank.fallback": True})
+                    log.warning(
+                        "rerank failed; answering from the retrieval order",
+                        extra={"error": f"{type(exc).__name__}: {str(exc)[:200]}"},
+                    )
+                    count("chatbot.rerank.fallbacks", 1)
+                    _fell_back.set(True)
+                    return hits[:k], usage
             usage = usage.add(rerank_usage)
         return hits[:k], usage
+
+    def used(self) -> RetrievalPipeline:
+        """The pipeline whose scores this turn's hits carry: ``fallback`` after a failed
+        rerank, else this one. Read its ``gate``, ``scorer`` and ``calibration``."""
+        return self.fallback if _fell_back.get() and self.fallback is not None else self
 
 
 def build_pipeline(
@@ -120,13 +156,17 @@ def build_pipeline(
     else:
         retriever = one(cfg.strategy)
     reranker = None
+    fallback = None
     if cfg.rerank.enabled:
         profile = settings.reranker_profile()
         reranker = registry.create("reranker", profile.provider, profile)
+        if cfg.rerank.fallback:
+            fallback = RetrievalPipeline(retriever, store, gate=cfg.gate_signal(rerank=False))
     return RetrievalPipeline(
         retriever,
         store,
         gate=cfg.gate_signal(),
         reranker=reranker,
         rerank_candidates=cfg.rerank.candidates,
+        fallback=fallback,
     )

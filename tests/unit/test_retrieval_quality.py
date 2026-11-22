@@ -1,6 +1,7 @@
 """Milestone 3 retrieval: BM25, hybrid fusion, HyDE, rewriting, rerank, gate and calibration."""
 
 import json
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -12,7 +13,8 @@ from chatbot.core.settings import ConfigError, RerankerProfile, RetrievalSection
 from chatbot.core.types import Calibration, ChatRequest, Chunk, ScoredChunk, Turn
 from chatbot.providers.embeddings.hashing import HashingEmbedder
 from chatbot.providers.llm.fake import FakeLLM
-from chatbot.providers.rerankers.cohere import CohereReranker
+from chatbot.providers.rerankers import RerankError, patient_reranking
+from chatbot.providers.rerankers.cohere import PATIENT_DELAYS, QUICK_DELAYS, CohereReranker
 from chatbot.providers.rerankers.cross_encoder import CrossEncoderReranker
 from chatbot.providers.rerankers.lexical import LexicalReranker
 from chatbot.retrieval.bm25 import bm25_rank, tokenize
@@ -114,6 +116,12 @@ def test_settings_reject_inconsistent_retrieval():
     assert RetrievalSection(strategy="hybrid").gate_signal() == "dense"
     assert RetrievalSection(strategy="bm25").gate_signal() == "bm25"
     assert RetrievalSection(rerank={"enabled": True}).gate_signal() == "rerank"
+    # The gate a failed rerank falls back to.
+    assert RetrievalSection(rerank={"enabled": True}).gate_signal(rerank=False) == "dense"
+    with_rerank_gate = RetrievalSection(gate="rerank", rerank={"enabled": True})
+    assert with_rerank_gate.gate_signal(rerank=False) == "dense"
+    bm25 = RetrievalSection(strategy="bm25", gate="bm25", rerank={"enabled": True})
+    assert bm25.gate_signal(rerank=False) == "bm25"
 
 
 # ---------------------------------------------------------------- HyDE and rewriting
@@ -212,6 +220,130 @@ async def test_cohere_reranker_needs_a_key(monkeypatch):
     rr = CohereReranker(RerankerProfile(provider="cohere", model="m"))
     with pytest.raises(ChatbotError, match="COHERE_API_KEY"):
         await rr.rerank("q", [sc("a", 0.9)], 1)
+
+
+class Cohere:
+    """A Cohere endpoint that answers from a script: status codes, or exceptions to raise."""
+
+    OK: ClassVar[dict] = {
+        "results": [{"index": 0, "relevance_score": 0.7}],
+        "meta": {"billed_units": {"search_units": 1}},
+    }
+
+    def __init__(self, *script, retry_after: str | None = None) -> None:
+        self.script = list(script)
+        self.calls = 0
+        self.slept: list[float] = []
+        self.retry_after = retry_after
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        step = self.script.pop(0) if self.script else 200
+        if isinstance(step, Exception):
+            raise step
+        headers = {"retry-after": self.retry_after} if self.retry_after and step != 200 else {}
+        body = self.OK if step == 200 else {"message": "nope"}
+        return httpx.Response(step, json=body, headers=headers)
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+
+    def reranker(self) -> CohereReranker:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(self.handler))
+        return CohereReranker(RerankerProfile(provider="cohere", model="m"), client, self.sleep)
+
+
+async def test_cohere_retries_rate_limits_and_server_errors(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "k")
+    api = Cohere(429, 503)
+    out, _ = await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert out[0].scores["rerank"] == 0.7
+    assert api.calls == 3 and api.slept == list(QUICK_DELAYS)
+
+
+async def test_cohere_retries_timeouts(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "k")
+    api = Cohere(httpx.ReadTimeout("slow"), httpx.ConnectError("refused"))
+    out, _ = await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert out and api.calls == 3
+
+
+async def test_cohere_gives_up_quickly_in_chat_and_waits_when_patient(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "k")
+    api = Cohere(*[429] * 20)
+    with pytest.raises(RerankError, match="after 3 attempts: HTTP 429"):
+        await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert api.calls == 3
+
+    # calibrate / eval: long enough to outlast a trial key's 10 calls per minute.
+    api = Cohere(*[429] * 6)
+    with patient_reranking():
+        out, _ = await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert out and api.calls == 7 and api.slept == list(PATIENT_DELAYS[:6])
+    assert sum(PATIENT_DELAYS) >= 120
+
+
+async def test_cohere_respects_retry_after(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "k")
+    api = Cohere(429, retry_after="20")
+    with patient_reranking():
+        await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert api.slept == [20.0]
+    # In a chat turn a long Retry-After is not waited for: the normal short delay is used.
+    api = Cohere(429, retry_after="20")
+    await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert api.slept == [QUICK_DELAYS[0]]
+
+
+async def test_cohere_does_not_retry_client_errors(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "k")
+    api = Cohere(401)
+    with pytest.raises(RerankError, match="HTTP 401"):
+        await api.reranker().rerank("q", [sc("a", 0.9)], 1)
+    assert api.calls == 1 and api.slept == []
+
+
+class BrokenReranker:
+    signature = "rerank[broken]"
+
+    async def rerank(self, query, hits, top_n):
+        raise RerankError("Cohere rerank failed after 3 attempts: HTTP 429")
+
+
+async def test_failed_rerank_answers_from_retrieval_order_with_its_calibration():
+    """A rate limit or outage must not take chat down. The hits keep their retrieval scores,
+    so they are gated by the retriever's calibration, not the reranker's."""
+    c = await build(retrieval={"rerank": {"enabled": True, "model": "lexical:overlap"}})
+    c.retriever.reranker = BrokenReranker()
+    question = ChatRequest(message="How long is the refund window for annual plans?")
+    resp = await c.orchestrator.run(question)
+    assert resp.kind == "answer" and "rerank_unavailable" in resp.warnings
+    assert c.retriever.fallback.scorer == "dense|dense"
+
+    index = await c.retriever.index()
+    await c.store.save_calibration(
+        index, Calibration(scorer="dense|dense", min_score=0.99, min_hits=1)
+    )
+    assert (await c.orchestrator.run(question)).kind == "clarify"  # dense calibration applied
+
+    # A turn whose rerank works is not marked.
+    c.retriever.reranker = LexicalReranker()
+    resp = await c.orchestrator.run(question)
+    assert "rerank_unavailable" not in resp.warnings
+
+
+async def test_rerank_failure_fails_the_request_when_fallback_is_off_or_patient():
+    c = await build(
+        retrieval={"rerank": {"enabled": True, "model": "lexical:overlap", "fallback": False}}
+    )
+    c.retriever.reranker = BrokenReranker()
+    with pytest.raises(RerankError):
+        await c.retriever.retrieve("refund window", 3, {})
+
+    c = await build(retrieval={"rerank": {"enabled": True, "model": "lexical:overlap"}})
+    c.retriever.reranker = BrokenReranker()
+    with patient_reranking(), pytest.raises(RerankError):  # calibrate / eval never fall back
+        await c.retriever.retrieve("refund window", 3, {})
 
 
 async def test_cross_encoder_runs_the_model_off_the_event_loop():

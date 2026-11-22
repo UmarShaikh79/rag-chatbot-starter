@@ -327,6 +327,13 @@ class SimpleOrchestrator:
             st.usage = st.usage.add(
                 priced_mixed(retrieval_usage, self.prices["cheap"], self.prices["embed"])
             )
+            # After a failed rerank the hits carry the retriever's scores: gate and
+            # calibrate them as such.
+            used = self.retriever.used() if hasattr(self.retriever, "used") else self.retriever
+            if used is not self.retriever:
+                scorer = getattr(used, "scorer", scorer)
+                st.warnings.append("rerank_unavailable")
+                s.set({"chatbot.retrieval.scorer": scorer, "chatbot.rerank.fallback": True})
             s.set({"chatbot.retrieval.hits": len(hits)})
             s.io(output=[{"id": h.chunk.id, "score": round(h.score, 4)} for h in hits])
         # Counted before the context guard: dropping a suspicious chunk must not lower the bar.
@@ -349,15 +356,15 @@ class SimpleOrchestrator:
         st.hits = hits
 
         # Weak retrieval -> clarify (or refuse); never invent an answer.
-        index = await self.retriever.index() if hasattr(self.retriever, "index") else None
+        index = await used.index() if hasattr(used, "index") else None
         calibration = None
-        if index is not None and hasattr(self.retriever, "calibration"):
-            calibration = await self.retriever.calibration(index)
+        if index is not None and hasattr(used, "calibration"):
+            calibration = await used.calibration(index)
         st.verdict = verdict = assess(
             hits,
             cfg.retrieval,
             calibration,
-            gate=getattr(self.retriever, "gate", None),
+            gate=getattr(used, "gate", None),
             warn_key=f"{index.name}:{scorer}" if index is not None else None,
             filtered=bool(st.request.filters),
             available=retrieved if retrieved < cfg.retrieval.top_k else None,
