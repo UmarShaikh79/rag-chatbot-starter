@@ -388,11 +388,13 @@ def langfuse_endpoint(settings: Settings, environ: Mapping[str, str]) -> tuple[s
     """Langfuse's OTLP traces URL and headers (Basic auth from the public and secret key)."""
     import base64
 
+    from chatbot.core.settings import ConfigError
+
     cfg = settings.observability.langfuse
     base = (environ.get(cfg.base_url_env) or cfg.base_url).rstrip("/")
     public, secret = environ.get(cfg.public_key_env), environ.get(cfg.secret_key_env)
     if not public or not secret:
-        raise RuntimeError(
+        raise ConfigError(
             f"observability.langfuse is enabled: set {cfg.public_key_env} and "
             f"{cfg.secret_key_env} (Langfuse project settings -> API keys)"
         )

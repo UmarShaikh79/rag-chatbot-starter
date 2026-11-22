@@ -5,6 +5,15 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: a missing `OPENAI_API_KEY` crashed `chatbot serve`, `chatbot worker` and the CLI with the
+  OpenAI SDK's 20-line traceback ("Missing credentials"). Missing keys are now one message
+  before anything starts, e.g. `Missing API key(s) for the 'dev' profile: OPENAI_API_KEY needed
+  by models.answer (openai:answer), models.cheap (...), models.embed (...)`, exit code 2
+  (`Settings.required_credentials()` / `check_credentials()`; the Cohere key counts when
+  reranking is on). `chatbot serve` also checks `DATABASE_URL`, the API-key hashes or JWT secret
+  and the Langfuse keys before uvicorn starts; those errors are now `ConfigError` (still a
+  `RuntimeError`) instead of bare `RuntimeError`s that the CLI printed as tracebacks. The OpenAI
+  adapters raise the same `ConfigError` when built without a key.
 - Fix: a non-streamed chat whose model or embedding provider failed (OpenAI down, a bad key,
   Ollama without the model) answered Starlette's plain-text `500 Internal Server Error`, with no
   `trace_id`, unlike every other error. Failures now answer JSON `{"detail", "trace_id"}` with
