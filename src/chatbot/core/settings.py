@@ -280,13 +280,19 @@ class RetrievalSection(Strict):
 
     def gate_signal(self, rerank: bool | None = None) -> str:
         """The gated score. ``rerank=False``: the gate when reranking is off or has failed."""
-        rerank = self.rerank.enabled if rerank is None else rerank
-        if self.gate != "auto" and (rerank or self.gate != "rerank"):
+        if rerank is None:
+            rerank = self.rerank.enabled
+        # A gate set by hand wins, except "rerank" when there is no rerank score to gate on.
+        rerank_gate_without_rerank = self.gate == "rerank" and not rerank
+        if self.gate != "auto" and not rerank_gate_without_rerank:
             return self.gate
         if rerank:
             return "rerank"
+        # Several retrievers (hybrid) gate on the dense score; a single one on its own score.
         names = self.retriever_names()
-        return "dense" if "dense" in names or len(names) > 1 else names[0]
+        if "dense" in names or len(names) > 1:
+            return "dense"
+        return names[0]
 
     @model_validator(mode="after")
     def _consistent(self) -> RetrievalSection:

@@ -51,31 +51,51 @@ class FakeLLM:
         self.calls: list[list[Message]] = []
 
     def _reply(self, messages: list[Message], purpose: str | None) -> str:
+        """A deterministic reply for each kind of call (``purpose``); an answer by default."""
         self.calls.append(messages)
         if self.script:
             return self.script.pop(0)
-        if purpose == "clarify":
-            return "Could you tell me a bit more about what you are looking for?"
-        if purpose == "summarize":
-            return self._summarize(messages[-1].content)
-        if purpose == "extract_facts":
-            return self._extract_facts(messages[-1].content)
-        if purpose == "hyde":
-            found = _QUESTION.search(messages[-1].content)
-            return found.group(1) if found else ""
-        if purpose == "rewrite_query":
-            return self._rewrite(messages[-1].content)
-        if purpose == "judge_groundedness":
-            from chatbot.guardrails.groundedness import lexical_verdict
+        handlers = {
+            "clarify": self._clarify,
+            "summarize": self._summarize,
+            "extract_facts": self._extract_facts,
+            "hyde": self._hypothetical_answer,
+            "rewrite_query": self._rewrite,
+            "judge_groundedness": self._judge,
+            "guard_injection": self._classify_injection,
+        }
+        handler = handlers.get(purpose or "", self._extractive_answer)
+        return handler(messages[-1].content)
 
-            body = messages[-1].content
-            sources, _, answer = body.partition("\nAnswer:")
-            return lexical_verdict(answer, sources.removeprefix("Sources:")).model_dump_json()
-        if purpose == "guard_injection":
-            found = _CLASSIFY.search(messages[-1].content)
-            hit = bool(detect_injection(found.group(1) if found else messages[-1].content))
-            return json.dumps({"injection": hit, "reason": "heuristic" if hit else ""})
-        user = messages[-1].content
+    @staticmethod
+    def _clarify(_prompt: str) -> str:
+        return "Could you tell me a bit more about what you are looking for?"
+
+    @staticmethod
+    def _hypothetical_answer(prompt: str) -> str:
+        """HyDE: echo the question back, standing in for a made-up answer passage."""
+        found = _QUESTION.search(prompt)
+        return found.group(1) if found else ""
+
+    @staticmethod
+    def _judge(prompt: str) -> str:
+        """Groundedness: the word-overlap verdict instead of a model's opinion."""
+        from chatbot.guardrails.groundedness import lexical_verdict
+
+        sources, _, answer = prompt.partition("\nAnswer:")
+        return lexical_verdict(answer, sources.removeprefix("Sources:")).model_dump_json()
+
+    @staticmethod
+    def _classify_injection(prompt: str) -> str:
+        """Injection check: the heuristic detector instead of a model."""
+        found = _CLASSIFY.search(prompt)
+        hit = bool(detect_injection(found.group(1) if found else prompt))
+        return json.dumps({"injection": hit, "reason": "heuristic" if hit else ""})
+
+    @staticmethod
+    def _extractive_answer(user: str) -> str:
+        """Quote the source sentence that shares the most words with the question, with its
+        citation marker; INSUFFICIENT_CONTEXT when none shares any."""
         question = _QUESTION.search(user)
         wanted = _words(question.group(1)) if question else set()
         best: tuple[int, int, str] | None = None  # (overlap, -order, sentence)

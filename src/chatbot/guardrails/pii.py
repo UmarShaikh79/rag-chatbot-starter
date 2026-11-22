@@ -85,11 +85,11 @@ class RegexPiiDetector:
     name = "regex"
 
     def find(self, text: str) -> list[PiiSpan]:
-        return [
-            PiiSpan(start=s, end=e, label=pattern.label)
-            for pattern in PATTERNS
-            for s, e in pattern.matches(text)
-        ]
+        spans = []
+        for pattern in PATTERNS:
+            for start, end in pattern.matches(text):
+                spans.append(PiiSpan(start=start, end=end, label=pattern.label))
+        return spans
 
 
 class Redactor:
@@ -193,8 +193,10 @@ class PiiGuard:
 class StreamRedactor:
     """Redacts PII in a token stream without ever splitting a match across two events.
 
-    Text is held back until it is at least ``holdback`` characters behind the stream head
-    and the cut point is whitespace that no PII match crosses. Anything still arriving
+    Why: a model streams text in small pieces. "Write to jane.doe@exa" then "mple.com" holds
+    no complete email in either piece, so redacting each piece alone would let the address
+    through. Text is held back until it is at least ``holdback`` characters behind the stream
+    head and the cut point is whitespace that no PII match crosses. Anything still arriving
     (and so possibly the start of a phone number or email) stays in the buffer.
     """
 

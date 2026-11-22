@@ -26,7 +26,8 @@ class GoldenItem(BaseModel):
     def _consistent(self) -> GoldenItem:
         if self.answerable and not self.expected_documents:
             raise ValueError(f"{self.id}: answerable questions need expected_documents")
-        if not self.answerable and (self.expected_documents or self.must_include):
+        expects_an_answer = bool(self.expected_documents or self.must_include)
+        if not self.answerable and expects_an_answer:
             raise ValueError(f"{self.id}: unanswerable questions take no expected answer")
         return self
 

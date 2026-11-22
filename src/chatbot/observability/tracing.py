@@ -53,6 +53,11 @@ MAX_TEXT_CHARS = 20_000  # per attribute; longer text is cut
 
 AttrValue = str | bool | int | float | list[str] | list[int] | list[float]
 
+# A ContextVar is a variable with its own value per request: each chat turn runs in its own
+# asyncio task, and a value set in one task is invisible to the others, so many requests at
+# once never see each other's user or trace. The other context variables in the template
+# (the usage ledger, patient reranking, the rerank fallback flag) work the same way.
+#
 # Trace-level attributes (user, session) copied onto every span of the current turn, which
 # is what Langfuse needs to filter by them (they must be on every span, not only the root).
 _trace_attrs: contextvars.ContextVar[dict[str, AttrValue] | None] = contextvars.ContextVar(
@@ -503,7 +508,9 @@ def build_otel(
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
 
     # Text goes on spans when any backend wants it; the others get it stripped.
-    capture = (otel.enabled and otel.capture_text) or (lf.enabled and lf.capture_text)
+    otel_wants_text = otel.enabled and otel.capture_text
+    langfuse_wants_text = lf.enabled and lf.capture_text
+    capture = otel_wants_text or langfuse_wants_text
     return OtelTelemetry(
         tracer_provider,
         meter_provider,

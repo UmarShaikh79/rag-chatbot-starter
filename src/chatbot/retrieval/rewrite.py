@@ -24,7 +24,9 @@ class QueryRewriter:
         self.prompts = prompts
 
     async def rewrite(self, question: str, history: list[Turn]) -> tuple[str, Usage]:
-        if not self.cfg.enabled or (self.cfg.only_with_history and not history):
+        # A first message has nothing to resolve ("it", "that plan"), so it is left as is.
+        nothing_to_resolve = self.cfg.only_with_history and not history
+        if not self.cfg.enabled or nothing_to_resolve:
             return question, Usage()
         lines = [f"{'User' if t.role == 'user' else 'Assistant'}: {t.content}" for t in history]
         messages = self.prompts.get(self.cfg.prompt).render(

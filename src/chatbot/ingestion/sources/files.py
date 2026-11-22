@@ -22,9 +22,11 @@ MEDIA_TYPES = {
 
 
 def media_type_for(path: Path) -> str:
-    return MEDIA_TYPES.get(path.suffix.lower()) or (
-        mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    )
+    known = MEDIA_TYPES.get(path.suffix.lower())
+    if known:
+        return known
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
 
 
 class FileSource:

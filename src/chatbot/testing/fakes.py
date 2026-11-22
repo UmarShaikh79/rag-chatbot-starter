@@ -144,7 +144,9 @@ class InMemoryVectorStore:
         from chatbot.retrieval.bm25 import bm25_rank
 
         # Statistics over the whole index, like the SQL version; filters only pick results.
-        corpus = [c for items in self._index_items(index) for c in items]
+        corpus: list[Chunk] = []
+        for items in self._index_items(index):
+            corpus.extend(items)
         allowed = {c.id for c in self._filtered(index, filters)}
         ranked = bm25_rank(query, [c.text for c in corpus])
         return [
@@ -154,7 +156,12 @@ class InMemoryVectorStore:
         ][:k]
 
     def _index_items(self, index: IndexInfo) -> list[list[Chunk]]:
-        return [[c for c, _ in items] for (i, _), items in self.chunks.items() if i == index.id]
+        """The chunks of each document in ``index`` (one list per document)."""
+        out = []
+        for (index_id, _document_id), items in self.chunks.items():
+            if index_id == index.id:
+                out.append([chunk for chunk, _vector in items])
+        return out
 
     async def get_calibration(self, index: IndexInfo, scorer: str) -> Calibration | None:
         return self.calibrations.get((index.id, scorer))

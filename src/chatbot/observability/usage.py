@@ -39,10 +39,22 @@ def priced_mixed(
         parts.append(priced(usage.model_copy(update={"embedding_tokens": 0}), llm_prices))
     if usage.embedding_tokens:
         parts.append(priced(usage, embed_prices, embedding=True))
-    costs = [p.cost_usd for p in parts]
-    cost = None if not parts or any(c is None for c in costs) else sum(costs)  # type: ignore[arg-type]
-    if usage.cost_usd is not None:
-        cost = usage.cost_usd if not parts else (None if cost is None else cost + usage.cost_usd)
+    # Token cost: None when there are no tokens, or when any part has no price set.
+    priced_costs = [p.cost_usd for p in parts if p.cost_usd is not None]
+    if parts and len(priced_costs) == len(parts):
+        token_cost: float | None = sum(priced_costs)
+    else:
+        token_cost = None
+
+    already_priced = usage.cost_usd
+    if already_priced is None:
+        cost = token_cost
+    elif not parts:
+        cost = already_priced
+    elif token_cost is None:
+        cost = None  # part of it has no price, so the total is unknown
+    else:
+        cost = token_cost + already_priced
     return usage.model_copy(update={"cost_usd": cost})
 
 

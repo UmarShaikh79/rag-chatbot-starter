@@ -156,22 +156,19 @@ class QdrantStore(CatalogStore):
             if len(v) != index.dims:
                 raise IndexMismatchError(f"Vector has {len(v)} dims, index expects {index.dims}")
         m = self.m
-        points = [
-            m.PointStruct(
-                id=point_id(c.id),
-                vector=[float(x) for x in v],
-                payload={
-                    "chunk_id": c.id,
-                    "document_id": document.id,
-                    "position": c.position,
-                    "text": c.text,
-                    "content_hash": c.content_hash,
-                    "user_id": user_id,
-                    "metadata": {**c.metadata, "source": document.source, "uri": document.uri},
-                },
-            )
-            for c, v in zip(chunks, vectors, strict=True)
-        ]
+        points = []
+        for c, vector in zip(chunks, vectors, strict=True):
+            payload = {
+                "chunk_id": c.id,
+                "document_id": document.id,
+                "position": c.position,
+                "text": c.text,
+                "content_hash": c.content_hash,
+                "user_id": user_id,
+                "metadata": {**c.metadata, "source": document.source, "uri": document.uri},
+            }
+            values = [float(x) for x in vector]
+            points.append(m.PointStruct(id=point_id(c.id), vector=values, payload=payload))
         ops: list[Any] = [
             m.DeleteOperation(delete=m.FilterSelector(filter=self._doc_filter(document.id)))
         ]

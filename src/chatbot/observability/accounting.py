@@ -169,7 +169,9 @@ class InMemoryUsageStore:
         groups: dict[str | None, list[tuple[int, Any]]] = defaultdict(list)
         for rec in self.records:
             at = rec.created_at or datetime.now(UTC)
-            if (since and at < since) or (until and at >= until):
+            before_window = since is not None and at < since
+            after_window = until is not None and at >= until
+            if before_window or after_window:
                 continue
             if user_id is not None and rec.user_id != user_id:
                 continue

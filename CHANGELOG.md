@@ -5,6 +5,17 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Readability pass for a mixed audience (no behaviour change): dense one-liners unfolded into
+  named steps (the API-key versus JWT routing in `auth/api_key.py`, mixed `and`/`or`
+  conditions, two nested conditional expressions, comprehensions with several loops); long
+  functions split into named helpers (`SimpleOrchestrator._stream_drafts` and
+  `_could_become`, Ollama's `_ThinkFilter`, `_terminal_kind` in `instrument.py`, the fake
+  model's purpose → handler table); "why" comments where the idea is not obvious (`part()` in
+  the container, BM25's formula, `StreamRedactor`, the pgvector filter SQL, context variables).
+  Ruff now enforces complexity limits (`C901` 12, `PLR0912` 12, `PLR0915` 50). Checked against
+  the old code: auth on 384 input combinations, BM25 on 400 random corpora, the fake model and
+  the think filter on every purpose and 5,000 random streams, and the offline eval (identical
+  metrics).
 - Dependabot no longer proposes a new Python version for the Docker base image. Its first run
   proposed 3.12 -> 3.15, which CI passed (CI runs 3.12 and doesn't build the image) but which
   breaks the image with the `presidio`, `qdrant` and `langgraph` extras (no 3.15 wheels for

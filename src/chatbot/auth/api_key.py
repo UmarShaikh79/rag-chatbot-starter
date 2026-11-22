@@ -71,12 +71,23 @@ class Authenticator:
         if self.mode in ("api_key", "api_key_or_jwt"):
             header_key = request.headers.get("x-api-key")
             token = bearer(request)
-            key = header_key.strip() if header_key else None
-            if key is None and token and not (self.jwt and looks_like_jwt(token)):
+            # An API key arrives in the X-API-Key header, or as "Authorization: Bearer <key>"
+            # when that bearer value is not a JWT (a JWT is checked further down).
+            bearer_is_jwt = self.jwt is not None and token is not None and looks_like_jwt(token)
+            if header_key:
+                key = header_key.strip()
+            elif token and not bearer_is_jwt:
                 key = token
+            else:
+                key = None
+
             if key and self._key_ok(key):
                 return Principal(method="api_key", admin=True)
-            if self.mode == "api_key" or (key and not token):
+
+            # No valid key. Stop here when API keys are the only way in, or when the key came
+            # in the header and there is no bearer token left to try as a JWT.
+            key_only_in_header = bool(key) and not token
+            if self.mode == "api_key" or key_only_in_header:
                 raise self._unauthorized("invalid or missing API key")
         if self.jwt is not None:
             token = bearer(request)

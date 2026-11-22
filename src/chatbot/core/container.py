@@ -138,7 +138,18 @@ def build(
     from chatbot.retrieval.rewrite import QueryRewriter
 
     def part(name: str, factory: Any) -> Any:
-        return overrides[name] if name in overrides else factory()
+        """The part called ``name``: the override passed to ``build`` if there is one, else
+        whatever ``factory()`` builds.
+
+        Each factory below is a ``lambda`` on purpose: it delays building the real part until
+        it is needed, so a test that passes ``memory=InMemoryMemoryStore()`` never creates the
+        Postgres one, and an offline run never builds an OpenAI client. Read
+        ``part("memory", lambda: PostgresMemoryStore(pool))`` as "the memory store: the one
+        given, or a new Postgres one".
+        """
+        if name in overrides:
+            return overrides[name]
+        return factory()
 
     alias = settings.vector_store.index
     # Every model call is wrapped once here: a span, token and cost metrics, and an entry in

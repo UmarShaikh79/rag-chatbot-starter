@@ -164,10 +164,14 @@ class PgVectorStore(CatalogStore):
         # Metadata filters, the same rule in every store (see chatbot.core.interfaces): a scalar
         # matches the key's value or any element of a list value; a list requires every
         # element. Each item is "equal or contained", both of which the GIN index can serve.
+        # Example: {"tags": "billing"} becomes
+        #   (c.metadata @> '{"tags": "billing"}' OR c.metadata @> '{"tags": ["billing"]}')
+        # which matches tags = "billing" and tags = ["billing", "refunds"] alike.
         for key, value in filters.items():
             if key == "document_id":
                 continue
-            for item in value if isinstance(value, list) else [value]:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
                 clauses.append("(c.metadata @> %s::jsonb OR c.metadata @> %s::jsonb)")
                 params.extend([json.dumps({key: item}), json.dumps({key: [item]})])
         return " AND ".join(clauses), params

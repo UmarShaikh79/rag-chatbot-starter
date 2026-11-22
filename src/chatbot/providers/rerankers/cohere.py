@@ -89,8 +89,16 @@ class CohereReranker:
                 problem = f"HTTP {resp.status_code}"
                 status = resp.status_code
                 if attempt < len(delays):
+                    # Honour Retry-After in calibrate and eval (patient). In a chat turn only
+                    # when it is no longer than the wait we would make anyway.
                     wait = _retry_after(resp)
-                    if wait is not None and (is_patient() or wait <= delays[attempt]):
+                    if wait is None:
+                        honour_retry_after = False
+                    elif is_patient():
+                        honour_retry_after = True
+                    else:
+                        honour_retry_after = wait <= delays[attempt]
+                    if honour_retry_after and wait is not None:
                         await self.sleep(max(wait, delays[attempt]))
                         continue
             if attempt < len(delays):

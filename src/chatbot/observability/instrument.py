@@ -341,16 +341,21 @@ class MeteredOrchestrator(_Wrapper):
                 async for event in self.inner.stream(req):
                     if event.terminal:
                         data = event.data
-                        kind = str(data.get("kind") or event.event)
-                        if event.event == "error":
-                            kind = "error"
-                            s.fail(str(data.get("message", "error")))
+                        kind = _terminal_kind(event, s)
                         # Account before the client sees the end of the stream.
                         await self._close(s, ledger, started, kind, True, data)
                     yield event
             finally:
                 if data is None:  # the stream ended early (client gone, cancelled)
                     await self._close(s, ledger, started, "cancelled", True, None)
+
+
+def _terminal_kind(event: ChatEvent, s: SpanHandle) -> str:
+    """How a streamed turn ended, from its last event; an error also marks the span failed."""
+    if event.event == "error":
+        s.fail(str(event.data.get("message", "error")))
+        return "error"
+    return str(event.data.get("kind") or event.event)
 
 
 @contextmanager
