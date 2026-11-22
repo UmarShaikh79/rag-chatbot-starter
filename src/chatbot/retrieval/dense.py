@@ -14,9 +14,12 @@ log = logging.getLogger(__name__)
 async def check_index(store: VectorStore, alias: str, embedder: Embedder) -> IndexInfo | None:
     """The index behind ``alias``, refusing one built with a different embedder (ADR 005)."""
     info = await store.get_index(alias)
-    if info is not None and (
+    if info is None:
+        return None
+    built_with_another_embedder = (
         info.embedding_model != embedder.model_id or info.dims != embedder.dims
-    ):
+    )
+    if built_with_another_embedder:
         raise IndexMismatchError(
             f"Index '{alias}' was built with {info.embedding_model} ({info.dims} dims); "
             f"the configured embedder is {embedder.model_id} ({embedder.dims} dims). "

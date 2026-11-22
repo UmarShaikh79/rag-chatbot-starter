@@ -44,26 +44,45 @@ def tokenize(text: str) -> list[str]:
 def bm25_rank(
     query: str, docs: list[str], k1: float = 1.2, b: float = 0.75
 ) -> list[tuple[int, float]]:
-    """(doc position, score) for docs sharing a term with the query, best first."""
+    """(doc position, score) for docs sharing a term with the query, best first.
+
+    For each query term found in a document, BM25 adds::
+
+        idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * doc_length / average_length))
+
+    - ``tf``: how often the term occurs in this document. More is better, but with
+      diminishing returns: ``k1`` sets how fast extra occurrences stop counting.
+    - ``idf``: how rare the term is across all documents. "E309" in 1 of 1,000 documents is
+      worth far more than "account" in 900 of them.
+    - ``b``: how much a long document is penalised (0 = not at all, 1 = fully), so a long page
+      doesn't win just because it contains more words.
+    """
     terms = set(tokenize(query))
     if not terms or not docs:
         return []
     tokenized = [tokenize(d) for d in docs]
     n = len(docs)
-    avgdl = sum(len(t) for t in tokenized) / n or 1.0
-    df = {t: sum(1 for toks in tokenized if t in toks) for t in terms}
+    average_length = sum(len(t) for t in tokenized) / n or 1.0
+
+    # Document frequency: in how many documents each query term appears (once per document).
+    df: Counter[str] = Counter()
+    for toks in tokenized:
+        for t in terms & set(toks):
+            df[t] += 1
+
     ranked = []
     for i, toks in enumerate(tokenized):
         tf = Counter(toks)
+        length_norm = 1 - b + b * len(toks) / average_length
         score = 0.0
         for t in terms:
             if not tf[t]:
                 continue
             idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
-            score += idf * tf[t] * (k1 + 1) / (tf[t] + k1 * (1 - b + b * len(toks) / avgdl))
+            score += idf * tf[t] * (k1 + 1) / (tf[t] + k1 * length_norm)
         if score > 0:
             ranked.append((i, score))
-    ranked.sort(key=lambda x: (-x[1], x[0]))
+    ranked.sort(key=lambda x: (-x[1], x[0]))  # best score first; ties keep document order
     return ranked
 
 

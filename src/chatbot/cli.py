@@ -462,7 +462,8 @@ def cmd_check_config(_: argparse.Namespace) -> None:
     print(json.dumps(settings.model_dump(mode="json", exclude={"catalog"}), indent=2))
 
 
-def main(argv: list[str] | None = None) -> None:
+# A long but flat table: one block per command, easier to scan as one list than split up.
+def main(argv: list[str] | None = None) -> None:  # noqa: PLR0915
     parser = argparse.ArgumentParser(prog="chatbot", description="RAG chatbot starter")
     sub = parser.add_subparsers(dest="command", required=True)
 

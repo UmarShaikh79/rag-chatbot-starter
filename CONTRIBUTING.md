@@ -61,7 +61,9 @@ Someone reading this code may be writing their first Python service. Write for t
 - **Config, not code.** Names of models and secrets live in `config/` and `.env`, never in
   application code.
 
-`ruff` (line length 100) settles formatting; there is nothing to argue about.
+`ruff` (line length 100) settles formatting; there is nothing to argue about. It also flags a
+function that grows too complex (complexity over 12, more than 12 branches or 50 statements):
+split it into named helpers rather than silencing the rule.
 
 ## Where things go
 

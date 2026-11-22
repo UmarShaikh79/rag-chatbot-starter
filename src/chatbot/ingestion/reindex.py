@@ -61,13 +61,22 @@ class ReindexReport(BaseModel):
     activated: bool = False
 
     def summary(self) -> dict[str, object]:
-        reports = [r for p in self.passes for r in [*p.sources.values(), p.stored]]
-        last = [*self.passes[-1].sources.values(), self.passes[-1].stored] if self.passes else []
+        # Each pass has a report per source plus one for documents copied from the old index.
+        reports = []
+        for p in self.passes:
+            reports.extend(p.sources.values())
+            reports.append(p.stored)
+        last: list = []
+        if self.passes:
+            last = [*self.passes[-1].sources.values(), self.passes[-1].stored]
+        failed: dict[str, str] = {}
+        for r in reports:
+            failed.update(r.failed)
         return {
             "indexed": sum(len(r.indexed) for r in reports),
             "removed": sum(len(r.removed) for r in reports),
             "changed_in_last_pass": sum(len(r.indexed) + len(r.removed) for r in last),
-            "failed": {k: v for r in reports for k, v in r.failed.items()},
+            "failed": failed,
             "missing": len(self.missing),
         }
 

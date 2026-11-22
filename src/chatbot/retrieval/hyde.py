@@ -55,8 +55,11 @@ class HydeRetriever:
         self, query: str, k: int, filters: dict[str, Any]
     ) -> tuple[list[ScoredChunk], Usage]:
         passage, usage = await self.hypothetical(query)
-        text = (
-            query if not passage else (f"{query}\n\n{passage}" if self.include_query else passage)
-        )
+        if not passage:
+            text = query  # generation failed or came back empty: search with the question
+        elif self.include_query:
+            text = f"{query}\n\n{passage}"
+        else:
+            text = passage
         hits, inner_usage = await self.inner.retrieve(text, k, filters)
         return hits, usage.add(inner_usage)

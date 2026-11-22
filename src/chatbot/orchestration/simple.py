@@ -57,6 +57,13 @@ TOO_LONG_TEXT = "Your message is too long. Please shorten it and try again."
 WEAK_REFUSAL_TEXT = "I couldn't find information about that in the knowledge base."
 
 
+def _could_become(prefix: str, text: str) -> bool:
+    """True while ``text`` (so far) could still be, or already is, ``prefix``: "ABS" could
+    become "ABSTAIN", and "ABSTAIN: ..." already starts with it."""
+    head = text.lstrip()
+    return prefix.startswith(head) or head.startswith(prefix)
+
+
 class SimpleOrchestrator:
     def __init__(
         self,
@@ -174,15 +181,36 @@ class SimpleOrchestrator:
     async def _generate(
         self, llm: LLM, messages: list[Message], purpose: str, draft: bool, hold_prefix: str = ""
     ) -> AsyncIterator[tuple[str, str, Usage | None]]:
-        """Yield ("delta", text, None) drafts, then ("done", full_text, usage)."""
+        """Yield ("delta", text, None) drafts, then ("done", full_text, usage).
+
+        Without ``draft`` the model answers in one call and only "done" is yielded. With it
+        (``answer.stream_mode: draft_then_final``) the text goes to the client while the model
+        writes it, so people see words at once; the final event later replaces the drafts
+        with the checked answer.
+        """
         if not draft:
             completion = await llm.generate(messages, purpose=purpose)
             yield "done", completion.text, completion.usage
             return
+        async for event in self._stream_drafts(llm, messages, purpose, hold_prefix):
+            yield event
+
+    async def _stream_drafts(
+        self, llm: LLM, messages: list[Message], purpose: str, hold_prefix: str
+    ) -> AsyncIterator[tuple[str, str, Usage | None]]:
+        """Stream the model's text as drafts. Two things are held back:
+
+        - PII: the ``StreamRedactor`` keeps the last characters until it can redact them
+          whole (an email can arrive in two pieces).
+        - ``hold_prefix``, the abstain marker the prompt asks for when the documents don't
+          answer: while the text could still turn into it, nothing is sent, so the marker
+          never flashes on screen before the clarifying question replaces it.
+        """
         redactor = StreamRedactor(
             self.settings.guardrails.stream_holdback_chars, self.guards.output_redactor
         )
-        full, usage, holding = "", None, bool(hold_prefix)
+        full, usage = "", None
+        holding = bool(hold_prefix)
         async for delta in llm.stream(messages, purpose=purpose):
             if delta.usage is not None:
                 usage = delta.usage
@@ -190,18 +218,18 @@ class SimpleOrchestrator:
                 continue
             full += delta.text
             if holding:
-                # Don't stream the abstain token: wait until the text can't be it.
-                head = full.lstrip()
-                if hold_prefix.startswith(head) or head.startswith(hold_prefix):
+                if _could_become(hold_prefix, full):
                     continue
                 holding = False
-                piece = redactor.feed(full)
+                piece = redactor.feed(full)  # release everything held so far
             else:
                 piece = redactor.feed(delta.text)
             if piece:
                 yield "delta", piece, None
+        # The stream ended while still holding: a short answer that only looked like the
+        # start of the marker is real text after all.
         if holding and not full.lstrip().startswith(hold_prefix):
-            holding = False  # short answer that only looked like the abstain token's start
+            holding = False
             piece = redactor.feed(full)
             if piece:
                 yield "delta", piece, None
@@ -459,10 +487,12 @@ class SimpleOrchestrator:
             )
 
         # The model abstained, or cited nothing while citations are required: clarify.
-        if abstain in st.raw or (cfg.answer.citations == "required" and not st.citations):
+        model_abstained = abstain in st.raw
+        missing_required_citations = cfg.answer.citations == "required" and not st.citations
+        if model_abstained or missing_required_citations:
             log.info(
                 "answer rejected",
-                extra={"abstained": abstain in st.raw, "citations": len(st.citations)},
+                extra={"abstained": model_abstained, "citations": len(st.citations)},
             )
             st.route = "clarify"
         elif cfg.guardrails.output.groundedness_check and self.judge is not None:

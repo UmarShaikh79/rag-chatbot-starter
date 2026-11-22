@@ -93,12 +93,22 @@ target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+# C901 / PLR0912 / PLR0915 keep functions small enough for someone new to follow
+# (CONTRIBUTING.md, "Code style for a mixed audience").
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF", "C901", "PLR0912", "PLR0915"]
 ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.ruff.lint.per-file-ignores]
 "migrations/**" = ["E501"]
+"tests/**" = ["C901", "PLR0912", "PLR0915"]
 "samples/**" = ["E501"]

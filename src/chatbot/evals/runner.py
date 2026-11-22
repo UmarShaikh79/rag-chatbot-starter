@@ -178,7 +178,10 @@ def summarize(
     hit_at: list[int],
 ) -> dict[str, Any]:
     answerable = [r for r in retrieval if r.answerable]
-    docs = {r.id: [h.document_id for h in r.hits] for r in answerable}
+    # Retrieved document IDs per question, in rank order.
+    docs: dict[str, list[str]] = {}
+    for r in answerable:
+        docs[r.id] = [h.document_id for h in r.hits]
     out: dict[str, Any] = {
         "count.questions": len(retrieval),
         "count.answerable": len(answerable),

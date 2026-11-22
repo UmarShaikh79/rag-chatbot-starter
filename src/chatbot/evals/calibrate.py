@@ -47,7 +47,12 @@ class CalibrationResult(BaseModel):
 
 def _candidates(rows: list[RetrievalRow]) -> list[tuple[float, float]]:
     """(threshold, margin): midpoints between neighbouring observed gate scores."""
-    scores = sorted({h.gate_score for r in rows for h in r.hits if h.gate_score is not None})
+    observed: set[float] = set()
+    for row in rows:
+        for hit in row.hits:
+            if hit.gate_score is not None:
+                observed.add(hit.gate_score)
+    scores = sorted(observed)
     if not scores:
         return [(0.0, 0.0)]
     out = [(scores[0] - 1e-6, 0.0)]  # everything passes
@@ -117,11 +122,12 @@ def sweep(
         return (p.abstention, p.answer_recall, p.margin, -p.min_hits)
 
     best = max(eligible, key=rank)
-    frontier = [
-        max((p for p in eligible if p.min_hits == h), key=rank)
-        for h in range(1, max_min_hits + 1)
-        if any(p.min_hits == h for p in eligible)
-    ]
+    # For the report: the best point for each min_hits value, to show the trade-off.
+    frontier = []
+    for hits in range(1, max_min_hits + 1):
+        with_these_hits = [p for p in eligible if p.min_hits == hits]
+        if with_these_hits:
+            frontier.append(max(with_these_hits, key=rank))
     n_ans = sum(r.answerable for r in rows)
     n_un = len(rows) - n_ans
     warnings = []

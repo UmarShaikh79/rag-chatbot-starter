@@ -101,7 +101,7 @@ class OllamaLLM:
 
     async def stream(self, messages: list[Message], **opts: Any) -> AsyncIterator[Delta]:
         payload = self._payload(messages, True, opts)
-        in_think = False
+        thinking = _ThinkFilter()
         try:
             async with self.client.stream("POST", "/api/chat", json=payload) as resp:
                 if resp.status_code >= 400:
@@ -114,18 +114,7 @@ class OllamaLLM:
                     if data.get("error"):
                         raise OllamaError(f"Ollama error for {self.model_id}: {data['error']}")
                     text = (data.get("message") or {}).get("content") or ""
-                    # Drop an inline <think> block that a model streams before its answer.
-                    out = ""
-                    if "<think>" in text:
-                        out, _, text = text.partition("<think>")
-                        in_think = True
-                    if in_think:
-                        if "</think>" in text:
-                            text = text.partition("</think>")[2].lstrip()
-                            in_think = False
-                        else:
-                            text = ""
-                    out += text
+                    out = thinking.feed(text)
                     if out:
                         yield Delta(text=out)
                     if data.get("done"):
@@ -135,6 +124,29 @@ class OllamaLLM:
                 f"Cannot reach Ollama at {self.client.base_url}: {exc}. Start it or set "
                 "OLLAMA_BASE_URL."
             ) from exc
+
+
+class _ThinkFilter:
+    """Drops a ``<think>...</think>`` block that some models stream before their answer.
+
+    The block can span many stream pieces, so the filter remembers whether it is inside one.
+    """
+
+    def __init__(self) -> None:
+        self.inside = False
+
+    def feed(self, text: str) -> str:
+        """The part of this piece to show."""
+        before = ""
+        if "<think>" in text:
+            before, _, text = text.partition("<think>")
+            self.inside = True
+        if self.inside:
+            if "</think>" not in text:
+                return before  # still thinking: show nothing more
+            text = text.partition("</think>")[2].lstrip()
+            self.inside = False
+        return before + text
 
 
 @registry.register("llm", "ollama")
