@@ -110,6 +110,9 @@ def make(profile):  # a RerankerProfile from config/models.yaml
 ```
 
 Use `chatbot.providers.rerankers.apply_scores(hits, scores, top_n)` to record the scores.
+Retry rate limits yourself and raise `RerankError` when you give up: chat turns then fall back to
+the retrieval order (`retrieval.rerank.fallback`), and `is_patient()` tells you when calibrate or
+eval wants you to wait longer.
 Add an entry under `rerankers:` in `config/models.yaml` and point `retrieval.rerank.model` at it.
 
 ## Add eval questions
@@ -202,6 +205,10 @@ and `dims`), register it with `@registry.register("llm", "myprovider")`, and add
 `config/models.yaml` with `provider: myprovider`. `providers/llm/ollama.py` is a small
 example over plain HTTP. Any OpenAI-compatible server (vLLM, LM Studio, Azure OpenAI with a
 compatible endpoint) works with `provider: openai` and a `base_url`.
+
+When the upstream fails after your retries, raise `chatbot.core.errors.ProviderError` (or let an
+`httpx` error through): the API answers 502 with your message, not 500. Don't put keys or raw
+upstream bodies in that message; clients see it.
 
 Whatever provider you add is traced and priced without extra code: the container wraps every
 LLM and embedder it builds (`observability/instrument.py`). Set `price_per_mtok` in its profile

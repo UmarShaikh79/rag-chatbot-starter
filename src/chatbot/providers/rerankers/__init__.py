@@ -16,13 +16,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from chatbot.core.errors import ChatbotError
+from chatbot.core.errors import ProviderError
 from chatbot.core.types import ScoredChunk
 
 _patient: ContextVar[bool] = ContextVar("rerank_patient", default=False)
 
 
-class RerankError(ChatbotError):
+class RerankError(ProviderError):
     """The reranker could not score the hits (after its retries)."""
 
 

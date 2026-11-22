@@ -8,6 +8,7 @@ continues an incoming W3C ``traceparent``, and the trace ID becomes the span's t
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -47,15 +48,40 @@ class TraceMiddleware:
             started = time.perf_counter()
             status = 500
 
+            started_response = False
+
             async def send_wrapper(message) -> None:
-                nonlocal status
+                nonlocal status, started_response
                 if message["type"] == "http.response.start":
                     status = message["status"]
+                    started_response = True
                     message.setdefault("headers", []).append((b"x-trace-id", trace_id.encode()))
                 await send(message)
 
             try:
                 await self.app(scope, receive, send_wrapper)
+            except Exception as exc:
+                # Not handled by the app: answer like every other error (JSON with the trace
+                # ID) instead of Starlette's plain "Internal Server Error". A response already
+                # under way (a stream) can't be replaced.
+                if started_response:
+                    raise
+                log.error("unhandled error", exc_info=exc, extra={"path": path})
+                span.fail(exc)
+                status = 500
+                body = json.dumps({"detail": "internal error", "trace_id": trace_id}).encode()
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 500,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode()),
+                            (b"x-trace-id", trace_id.encode()),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
             finally:
                 seconds = time.perf_counter() - started
                 route = getattr(scope.get("route"), "path", None)
