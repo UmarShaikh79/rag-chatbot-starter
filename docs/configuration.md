@@ -43,6 +43,12 @@ Ollama tags were read from the Ollama library on 2026-11-22; choose ones that fi
 The OpenAI model IDs were taken from OpenAI's models page on 2026-11-21. Check them when you
 clone; only `models.yaml` needs to change.
 
+API keys are checked before anything starts. `chatbot serve`, `chatbot worker`, `eval`,
+`calibrate` and `ingest` list every key the configured models need and don't have (from each
+profile's `api_key_env`; OpenAI and Cohere default to `OPENAI_API_KEY` and `COHERE_API_KEY`)
+in one message and exit with code 2. `chatbot serve` also checks `DATABASE_URL`, the API-key
+hashes or JWT secret for `auth.mode`, and the Langfuse keys when Langfuse is on.
+
 ### `vector_store`
 
 | Key | Default | Notes |

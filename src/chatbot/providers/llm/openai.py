@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from chatbot.core.registry import registry
-from chatbot.core.settings import LLMProfile
+from chatbot.core.settings import ConfigError, LLMProfile
 from chatbot.core.types import Completion, Delta, Message, Usage
 
 
@@ -20,7 +20,13 @@ class OpenAILLM:
         if client is None:
             from openai import AsyncOpenAI
 
-            api_key = os.environ.get(profile.api_key_env or "OPENAI_API_KEY")
+            env = profile.api_key_env or "OPENAI_API_KEY"
+            api_key = os.environ.get(env, "").strip()
+            if not api_key:  # the SDK would raise with a long traceback
+                raise ConfigError(
+                    f"Set {env} for the OpenAI model {profile.model} (see .env.example), or "
+                    "run CHATBOT_PROFILE=offline, which needs no key."
+                )
             client = AsyncOpenAI(api_key=api_key, base_url=profile.base_url)
         self.client = client
 

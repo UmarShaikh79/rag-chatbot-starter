@@ -19,6 +19,7 @@ async def _components(role: str = "cli"):
     from chatbot.observability.tracing import configure_telemetry
 
     settings = get_settings()
+    settings.check_credentials()  # one readable error for every missing key, before any client
     configure_telemetry(settings, role)  # no-op unless otel or langfuse is on (ADR 026)
     pool = make_pool(settings)
     await pool.open(wait=True, timeout=30)
@@ -37,9 +38,27 @@ def cmd_migrate(_: argparse.Namespace) -> None:
     print("database is up to date")
 
 
+def _preflight_serve() -> None:
+    """What would otherwise fail inside uvicorn's startup, with a traceback: missing API keys,
+    DATABASE_URL, API-key hashes or JWT secret, Langfuse keys. Each raises ConfigError, which
+    `main` prints as one message."""
+    import os
+
+    from chatbot.auth.api_key import Authenticator
+    from chatbot.observability.tracing import langfuse_endpoint
+
+    settings = get_settings()
+    settings.check_credentials()
+    settings.database_url()
+    Authenticator(settings.auth)
+    if settings.observability.langfuse.enabled:
+        langfuse_endpoint(settings, os.environ)
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
 
+    _preflight_serve()
     uvicorn.run(
         "chatbot.api.app:create_app",
         factory=True,
@@ -153,6 +172,7 @@ async def _eval_components():
     from chatbot.testing.fakes import InMemoryJobQueue, InMemoryMemoryStore
 
     settings = get_settings()
+    settings.check_credentials()
     pool = make_pool(settings)
     await pool.open(wait=True, timeout=30)
     # Eval runs are not billed to anyone: no usage records (metrics and traces still flow).
