@@ -10,6 +10,13 @@ matters, how to bring the change into a copy you have already modified.
   image-only deployment (Compose without uv on the host, Kubernetes) could not calibrate its
   thresholds. A unit test checks that the Dockerfile copies every folder the app reads at
   runtime. In a copy you have modified: add `COPY evals ./evals` to `docker/Dockerfile`.
+- First live run of the `dev` profile (OpenAI). The model IDs `gpt-6.2-sol` and `gpt-6-luna`
+  are confirmed, and `config/models.yaml` now has prices (standard tier, 2026-11-22), so
+  `cost_usd` is filled in. `evals/baselines/dev.json` records the first measured run:
+  hit@3 1.0, answer rate 0.96, faithfulness 1.0, unanswerable rate 0.9, about $0.03 per run.
+  Calibrated thresholds for `text-embedding-3-small` on the sample corpus:
+  `min_score 0.409`, `min_hits 1`. In a copy you have modified: copy the prices, and record
+  your own baseline with `chatbot eval --update-baseline` on your corpus.
 
 ## 0.5.0: milestone 5
 

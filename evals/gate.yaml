@@ -23,8 +23,10 @@ profiles:
       errors: 0
     max_drop: 0.05
 
-  # Hosted models (OpenAI). Starting floors, not measured yet: run `chatbot eval` once
-  # with your key, then tighten these and commit a baseline.
+  # Hosted models (OpenAI). Floors set before any measurement; the first measured runs
+  # (2026-11-22, gpt-6.2-sol + text-embedding-3-small, baselines/dev.json) cleared all of
+  # them. must_include_rate (0.83) sits near its floor because it matches exact phrases and
+  # a real model rephrases ("aren't refunded" for "not refunded"); it understates accuracy.
   dev:
     min:
       retrieval.hit@3: 0.9

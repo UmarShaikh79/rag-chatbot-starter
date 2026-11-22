@@ -2,8 +2,10 @@
 # so changing provider or model is a one-line edit here.
 #
 # OpenAI IDs below were read from https://developers.openai.com/api/docs/models on
-# 2026-11-21 (mid-tier and small recommendations). Check that page when you clone.
-# Prices are left null on purpose: fill them from the pricing page to get cost_usd in responses.
+# 2026-11-21 (mid-tier and small recommendations) and confirmed on 2026-11-22. Check that page
+# when you clone. Prices: USD per 1M tokens, standard tier, short context, from
+# https://developers.openai.com/api/docs/pricing on 2026-11-22. Cached-input discounts are not
+# modelled, so cost_usd is an upper bound.
 
 llm:
   openai:answer:
@@ -11,13 +13,13 @@ llm:
     model: gpt-6.2-sol
     api_key_env: OPENAI_API_KEY
     params: {}
-    price_per_mtok: {input: null, output: null}
+    price_per_mtok: {input: 2.00, output: 10.00}
   openai:cheap:
     provider: openai
     model: gpt-6-luna
     api_key_env: OPENAI_API_KEY
     params: {}
-    price_per_mtok: {input: null, output: null}
+    price_per_mtok: {input: 0.10, output: 0.50}
   # Local models through Ollama (config/profiles/local-ollama.yaml). Pull them first:
   #   ollama pull qwen3.5:9b && ollama pull gemma3:4b && ollama pull nomic-embed-text
   # Tags read from https://ollama.com/library and a Sept 2026 ranking
@@ -47,7 +49,7 @@ embeddings:
     model: text-embedding-3-small
     dims: 1536
     api_key_env: OPENAI_API_KEY
-    price_per_mtok: {input: null}
+    price_per_mtok: {input: 0.02}
   # Local embeddings through Ollama. 768 dims, so never interchangeable with the 1536-dim
   # OpenAI index (ADR 005); switching between them is a re-index (ADR 023). The prefixes
   # are what nomic-embed-text was trained with; other models want their own or none.

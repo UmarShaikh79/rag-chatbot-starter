@@ -1,0 +1,31 @@
+{
+  "summary": {
+    "count.questions": 34,
+    "count.answerable": 24,
+    "count.unanswerable": 10,
+    "retrieval.hit@1": 0.9167,
+    "retrieval.hit@3": 1.0,
+    "retrieval.hit@top_k": 1.0,
+    "retrieval.recall@top_k": 1.0,
+    "retrieval.mrr": 0.9583,
+    "answer.answer_rate": 0.9583,
+    "answer.must_include_rate": 0.8333,
+    "answer.citation_precision": 1.0,
+    "answer.faithfulness": 1.0,
+    "abstention.unanswerable_rate": 0.9,
+    "errors": 0,
+    "latency.p50_ms": 1392.1,
+    "latency.p95_ms": 2917.5,
+    "usage.tokens": 12944,
+    "usage.cost_usd": 0.027043
+  },
+  "meta": {
+    "dataset": "golden.jsonl@049a5ffb",
+    "index": "docs__text_embedding_3_small__1536",
+    "embedding_model": "text-embedding-3-small",
+    "scorer": "dense|dense",
+    "calibrated": true,
+    "answer_model": "gpt-6.2-sol",
+    "faithfulness_judge": "llm"
+  }
+}
