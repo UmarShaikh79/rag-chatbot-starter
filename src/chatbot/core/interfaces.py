@@ -17,6 +17,7 @@ from chatbot.core.types import (
     GuardPayload,
     GuardResult,
     IndexInfo,
+    IndexSummary,
     Job,
     MemoryState,
     Message,
@@ -24,6 +25,7 @@ from chatbot.core.types import (
     PiiSpan,
     RawDocument,
     ScoredChunk,
+    StoredDocument,
     Turn,
     Usage,
     UserFact,
@@ -95,6 +97,40 @@ class CalibrationStore(Protocol):
     async def get_calibration(self, index: IndexInfo, scorer: str) -> Calibration | None: ...
 
     async def save_calibration(self, index: IndexInfo, calibration: Calibration) -> None: ...
+
+
+@runtime_checkable
+class IndexAdmin(Protocol):
+    """Optional store capability: build a new index beside the live one, then switch the
+    alias over in one step, and back again (ADR 023). Both built-in stores have it."""
+
+    async def create_index(
+        self, alias: str, embedding_model: str, dims: int, chunker_version: str, staging: str
+    ) -> IndexInfo: ...
+
+    async def mark_ready(self, index: IndexInfo, report: dict[str, Any]) -> None: ...
+
+    async def activate(self, alias: str, staging: str, force: bool = False) -> IndexInfo: ...
+
+    async def rollback(self, alias: str) -> IndexInfo: ...
+
+    async def drop_index(self, name: str) -> None: ...
+
+    async def list_indexes(self) -> list[IndexSummary]: ...
+
+    async def resolve_any(self, alias: str) -> IndexInfo | None: ...
+
+    def iter_documents(
+        self, index: IndexInfo, exclude_sources: set[str]
+    ) -> AsyncIterator[StoredDocument]: ...
+
+
+@runtime_checkable
+class UserDocumentEraser(Protocol):
+    """Optional store capability: delete a user's vectors when they live outside Postgres,
+    so ``forget_user`` leaves nothing behind (ADR 015, ADR 024)."""
+
+    async def forget_user_documents(self, user_id: str) -> int: ...
 
 
 @runtime_checkable

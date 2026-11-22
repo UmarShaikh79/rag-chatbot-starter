@@ -20,7 +20,8 @@ async def check_index(store: VectorStore, alias: str, embedder: Embedder) -> Ind
         raise IndexMismatchError(
             f"Index '{alias}' was built with {info.embedding_model} ({info.dims} dims); "
             f"the configured embedder is {embedder.model_id} ({embedder.dims} dims). "
-            "Re-ingest into a new alias or switch the embedder back."
+            "It will not be searched: run `chatbot reindex` and `chatbot index activate` "
+            "(ADR 023), or switch models.embed back."
         )
     return info
 

@@ -29,10 +29,14 @@ from chatbot.guardrails.pipeline import GuardPipeline
 BUILTIN_MODULES = [
     "chatbot.providers.llm.openai",
     "chatbot.providers.llm.fake",
+    "chatbot.providers.llm.ollama",
     "chatbot.providers.embeddings.openai",
     "chatbot.providers.embeddings.hashing",
+    "chatbot.providers.embeddings.ollama",
     "chatbot.stores.pgvector",
+    "chatbot.stores.qdrant",  # imports qdrant-client only when the store is built
     "chatbot.ingestion.sources.files",
+    "chatbot.ingestion.sources.sql",
     "chatbot.ingestion.parsers",
     "chatbot.ingestion.chunkers.recursive",
     "chatbot.retrieval.dense",
@@ -92,6 +96,9 @@ class Components:
     extras: dict[str, Any] = field(default_factory=dict)
 
     async def close(self) -> None:
+        closer = getattr(self.store, "close", None)  # e.g. the Qdrant client
+        if closer is not None:
+            await closer()
         if self.pool is not None:
             await self.pool.close()
 

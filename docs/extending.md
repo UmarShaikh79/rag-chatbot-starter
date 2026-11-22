@@ -5,39 +5,45 @@ register a factory under a name; config picks the name; `core/container.py` buil
 Put your code in `src/chatbot/domain/` (imported last, so your registrations override built-ins)
 or edit the built-ins directly: it is your copy.
 
-## Add a source (for example, rows from your database)
+## Add a source
+
+Rows from a SQL database need no code: use `type: sql` (see
+[configuration](configuration.md#ingestion)). For anything else (a CMS, a ticketing system, an
+object store), implement `iter_documents()`:
 
 ```python
-# src/chatbot/domain/crm_source.py
+# src/chatbot/domain/cms_source.py
 from collections.abc import AsyncIterator
-import psycopg
+import os
+
+import httpx
+
 from chatbot.core.registry import registry
 from chatbot.core.types import RawDocument
 
 
-class CrmArticles:
-    def __init__(self, name: str, dsn: str):
-        self.name, self.dsn = name, dsn
+class CmsPages:
+    def __init__(self, name: str, base_url: str, token: str):
+        self.name, self.base_url, self.token = name, base_url, token
 
     async def iter_documents(self) -> AsyncIterator[RawDocument]:
-        async with await psycopg.AsyncConnection.connect(self.dsn) as conn:
-            cur = await conn.execute("select id, title, body from articles where published")
-            async for id_, title, body in cur:
+        async with httpx.AsyncClient(base_url=self.base_url) as client:
+            resp = await client.get("/pages", headers={"Authorization": f"Bearer {self.token}"})
+            resp.raise_for_status()
+            for page in resp.json():
                 yield RawDocument(
-                    id=f"{self.name}:{id_}",
+                    id=f"{self.name}:{page['id']}",
                     source=self.name,
-                    uri=f"crm://articles/{id_}",
-                    title=title,
-                    media_type="text/markdown",
-                    content=body.encode(),
+                    uri=page["url"],
+                    title=page["title"],
+                    media_type="text/html",
+                    content=page["html"].encode(),
                 )
 
 
-@registry.register("source", "crm")
+@registry.register("source", "cms")
 def make(cfg, root_dir):
-    import os
-
-    return CrmArticles(cfg.name, os.environ[cfg.options["dsn_env"]])
+    return CmsPages(cfg.name, cfg.options["base_url"], os.environ[cfg.options["token_env"]])
 ```
 
 Import it from `src/chatbot/domain/__init__.py`, then configure it:
@@ -46,12 +52,13 @@ Import it from `src/chatbot/domain/__init__.py`, then configure it:
 ingestion:
   sources:
     - {name: samples, type: files, path: samples/docs}
-    - {name: crm, type: crm, options: {dsn_env: CRM_DATABASE_URL}}
+    - {name: help, type: cms, options: {base_url: "https://cms.example.com/api", token_env: CMS_TOKEN}}
 ```
 
-`chatbot ingest --source crm --wait` syncs it. Only changed rows are re-embedded and rows that
-disappeared are removed. If your app would rather push records, use `POST /v1/ingest` with
-`documents` instead and skip the source class.
+`chatbot ingest --source help --wait` syncs it. Only changed documents are re-embedded and
+documents that disappeared are removed, but only after the source was read to the end: a
+source that raises part way leaves the index as it was. If your app would rather push records,
+use `POST /v1/ingest` with `documents` instead and skip the source class.
 
 ## Add a parser
 
@@ -192,8 +199,21 @@ provider puts permissions in another claim (`roles`, `groups`, `permissions`), e
 
 Implement `generate()` and `stream()` (or `embed_documents()` / `embed_query()` with `model_id`
 and `dims`), register it with `@registry.register("llm", "myprovider")`, and add a profile to
-`config/models.yaml` with `provider: myprovider`. Any OpenAI-compatible server (vLLM, LM Studio,
-Azure OpenAI with a compatible endpoint) works with `provider: openai` and a `base_url`.
+`config/models.yaml` with `provider: myprovider`. `providers/llm/ollama.py` is a small
+example over plain HTTP. Any OpenAI-compatible server (vLLM, LM Studio, Azure OpenAI with a
+compatible endpoint) works with `provider: openai` and a `base_url`.
+
+## Add a vector store
+
+Subclass `chatbot.stores.catalog.CatalogStore`: it keeps aliases, documents, calibrations,
+re-indexing and rollback in Postgres, so a store only adds its vector parts:
+`_create_physical` and `_drop_physical` (a collection or index per physical index),
+`replace_document`, `delete_document` and `search`. Set `backend = "mystore"`, register a
+factory with `@registry.register("vector_store", "mystore")`, and select it with
+`vector_store.backend: mystore`. `stores/qdrant.py` is the worked example. Optional
+capabilities: `keyword_search` (BM25 and hybrid retrieval) and `forget_user_documents` (when
+vectors carry user data outside Postgres). Move an existing index into it with
+`chatbot reindex`.
 
 ## Change prompts
 

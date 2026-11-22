@@ -1,0 +1,19 @@
+# Everything local: Ollama for chat and embeddings, no API key, no data leaves the machine.
+#   ollama pull qwen3.5:9b && ollama pull gemma3:4b && ollama pull nomic-embed-text
+#   CHATBOT_PROFILE=local-ollama chatbot ingest --inline
+# With Docker: `make up-ollama` starts Ollama and pulls the models (see docker/compose.yaml).
+models:
+  answer: ollama:answer
+  cheap: ollama:cheap
+  embed: ollama:nomic-embed-text
+vector_store:
+  # Its own alias: the 768-dim local index lives beside the OpenAI one. To move an existing
+  # alias to the local model instead, keep the alias and run `chatbot reindex` (ADR 023).
+  index: docs_local
+retrieval:
+  # Provisional, a guess for nomic-embed-text cosine scores (ADR 011): run
+  # `chatbot calibrate --apply` after ingesting; the calibrated values replace these.
+  min_score: 0.5
+  min_hits: 1
+observability:
+  log_format: text

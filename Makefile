@@ -3,7 +3,7 @@ API ?= http://localhost:8000
 Q ?= How long is the refund window for annual plans?
 TEST_DATABASE_URL ?= postgresql://chatbot:chatbot@localhost:5432/chatbot_test
 
-.PHONY: help install up down logs migrate ingest ask ask-stream api-key test test-unit test-db lint format check-config eval eval-retrieval calibrate calibrate-apply
+.PHONY: help install up up-ollama up-qdrant ollama-pull reindex index-list index-activate index-rollback down logs migrate ingest ask ask-stream api-key test test-unit test-db lint format check-config eval eval-retrieval calibrate calibrate-apply
 
 help:          ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -15,8 +15,31 @@ up:            ## start postgres, api and worker in Docker
 	$(COMPOSE) up --build -d
 	@echo "API on $(API) (docs at $(API)/docs)"
 
+up-ollama:     ## same, plus Ollama (pulls the local models on first start)
+	$(COMPOSE) --profile ollama up --build -d
+	@echo "Set CHATBOT_PROFILE=local-ollama in .env, then: make ingest"
+
+up-qdrant:     ## same, plus Qdrant (builds the app with the qdrant extra)
+	UV_EXTRAS="--extra qdrant" $(COMPOSE) --profile qdrant up --build -d
+	@echo "Set CHATBOT__VECTOR_STORE__BACKEND=qdrant in .env, then: make reindex"
+
+ollama-pull:   ## pull the models named in config/models.yaml into the Ollama container
+	$(COMPOSE) --profile ollama run --rm ollama-pull
+
+reindex:       ## build an index for the current config beside the live one (ADR 023)
+	$(COMPOSE) exec api chatbot reindex
+
+index-list:    ## physical indexes, their aliases and status
+	$(COMPOSE) exec api chatbot index list
+
+index-activate: ## switch the alias to the index `make reindex` built
+	$(COMPOSE) exec api chatbot index activate
+
+index-rollback: ## switch the alias back to the previous index
+	$(COMPOSE) exec api chatbot index rollback
+
 down:          ## stop the stack
-	$(COMPOSE) down
+	$(COMPOSE) --profile ollama --profile qdrant down
 
 logs:          ## follow api and worker logs
 	$(COMPOSE) logs -f api worker

@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from chatbot.core.interfaces import Chunker, Embedder, Source, VectorStore
-from chatbot.core.types import IndexInfo, RawDocument, Usage
+from chatbot.core.types import IndexInfo, ParsedDocument, RawDocument, Usage
 from chatbot.ingestion.parsers import parser_for
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,18 @@ class IngestionPipeline:
             raise
         except Exception as exc:  # parser libraries raise their own error types
             raise DocumentError(f"could not parse {raw.id}: {exc}") from exc
+        return await self.ingest_parsed(index, parsed, report, user_id=raw.user_id, force=force)
+
+    async def ingest_parsed(
+        self,
+        index: IndexInfo,
+        parsed: ParsedDocument,
+        report: IngestReport,
+        user_id: str | None = None,
+        force: bool = False,
+    ) -> Outcome:
+        """Chunk, embed and store an already parsed document (re-indexing uses this to
+        rebuild documents from the text an index kept)."""
         state = await self.store.document_state(index, parsed.id)
         if (
             not force
@@ -93,14 +105,19 @@ class IngestionPipeline:
             vectors.extend(vecs)
             report.usage = report.usage.add(usage)
         index = index.model_copy(update={"chunker_version": self.chunker.version})
-        await self.store.replace_document(index, parsed, chunks, vectors, user_id=raw.user_id)
+        await self.store.replace_document(index, parsed, chunks, vectors, user_id=user_id)
         report.indexed.append(parsed.id)
         report.chunks += len(chunks)
         log.info("document indexed", extra={"document_id": parsed.id, "chunks": len(chunks)})
         return "indexed" if chunks else "empty"
 
-    async def sync_source(self, source: Source, force: bool = False) -> IngestReport:
-        index = await self.index()
+    async def sync_source(
+        self, source: Source, force: bool = False, index: IndexInfo | None = None
+    ) -> IngestReport:
+        """Bring ``source`` in line with the index: new and changed documents are
+        (re-)indexed, missing ones removed. ``index`` defaults to the configured alias;
+        re-indexing passes the index it is building."""
+        index = index or await self.index()
         report = IngestReport(source=source.name)
         seen: set[str] = set()
         async for raw in source.iter_documents():

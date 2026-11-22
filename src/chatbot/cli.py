@@ -237,6 +237,97 @@ def cmd_calibrate(args: argparse.Namespace) -> None:
     sys.exit(asyncio.run(_calibrate(args)))
 
 
+async def _reindex(args: argparse.Namespace) -> dict[str, Any]:
+    from chatbot.core.container import make_source
+    from chatbot.ingestion.reindex import reindex
+
+    c = await _components()
+    try:
+        settings = c.settings
+        sources = [make_source(settings, s.name) for s in settings.ingestion.sources]
+        report = await reindex(
+            c.store,
+            c.pipeline,
+            sources,
+            settings.vector_store.index,
+            backend=settings.vector_store.backend,
+            restart=args.restart,
+            allow_missing=args.allow_missing,
+            activate=args.activate,
+            catch_up=not args.no_catch_up,
+        )
+    finally:
+        await c.close()
+    out = report.model_dump(mode="json", exclude={"passes"}) | {"summary": report.summary()}
+    if report.missing and not report.ready:
+        print(
+            f"{len(report.missing)} documents in the live index have no stored text and come "
+            "from no configured source, so they could not be rebuilt (listed under "
+            "'missing'). Push them again through POST /v1/ingest with "
+            f"CHATBOT__VECTOR_STORE__INDEX={report.staging}, then rerun; or rerun with "
+            "--allow-missing to leave them out.",
+            file=sys.stderr,
+        )
+    elif not report.activated:
+        print(
+            f"Built {report.new_index} behind '{report.staging}'. Next:\n"
+            f"  CHATBOT__VECTOR_STORE__INDEX={report.staging} chatbot calibrate --apply\n"
+            f"  CHATBOT__VECTOR_STORE__INDEX={report.staging} chatbot eval --gate\n"
+            "  chatbot index activate        # then restart the API and workers",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"'{report.alias}' now points at {report.new_index}. Calibrate it "
+            "(`chatbot calibrate --apply`) and restart the API and workers with this config.",
+            file=sys.stderr,
+        )
+    return out
+
+
+def cmd_reindex(args: argparse.Namespace) -> None:
+    out = asyncio.run(_reindex(args))
+    print(json.dumps(out, indent=2, default=str))
+    if out["missing"] and not out["ready"]:
+        sys.exit(1)
+
+
+async def _index_admin(args: argparse.Namespace) -> Any:
+    from chatbot.core.interfaces import IndexAdmin
+    from chatbot.stores.catalog import staging_alias
+
+    c = await _components()
+    try:
+        store = c.store
+        if not isinstance(store, IndexAdmin):
+            raise ChatbotError(f"{type(store).__name__} does not support index administration")
+        alias = c.settings.vector_store.index
+        if args.action == "list":
+            return [s.model_dump(mode="json") for s in await store.list_indexes()]
+        if args.action == "activate":
+            info = await store.activate(alias, staging_alias(alias), force=args.force)
+            print(
+                f"'{alias}' now points at {info.name}. Restart the API and workers with the "
+                "configuration it was built with. Undo with `chatbot index rollback`.",
+                file=sys.stderr,
+            )
+            return info.model_dump(mode="json")
+        if args.action == "rollback":
+            info = await store.rollback(alias)
+            print(f"'{alias}' points at {info.name} again.", file=sys.stderr)
+            return info.model_dump(mode="json")
+        if args.action == "drop":
+            await store.drop_index(args.name)
+            return {"dropped": args.name}
+        raise ChatbotError(f"unknown action {args.action}")
+    finally:
+        await c.close()
+
+
+def cmd_index(args: argparse.Namespace) -> None:
+    print(json.dumps(asyncio.run(_index_admin(args)), indent=2, default=str))
+
+
 def cmd_hash_key(args: argparse.Namespace) -> None:
     from chatbot.auth.api_key import hash_key, new_key
 
@@ -321,6 +412,36 @@ def main(argv: list[str] | None = None) -> None:
         "--check", action="store_true", help="exit 1 when the answer-recall target is missed"
     )
     cal.set_defaults(func=cmd_calibrate)
+
+    ri = sub.add_parser(
+        "reindex",
+        help="build a new index for the current config beside the live one (ADR 023)",
+    )
+    ri.add_argument(
+        "--activate", action="store_true", help="switch the alias over when the build is ready"
+    )
+    ri.add_argument(
+        "--restart", action="store_true", help="start a fresh build instead of resuming one"
+    )
+    ri.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="mark ready even if some documents could not be rebuilt",
+    )
+    ri.add_argument(
+        "--no-catch-up", action="store_true", help="skip the second pass (nothing writes now)"
+    )
+    ri.set_defaults(func=cmd_reindex)
+
+    ix = sub.add_parser("index", help="list, activate, roll back or drop physical indexes")
+    ix_sub = ix.add_subparsers(dest="action", required=True)
+    ix_sub.add_parser("list", help="every index with its aliases and status")
+    act = ix_sub.add_parser("activate", help="point the alias at the index behind <alias>_next")
+    act.add_argument("--force", action="store_true", help="activate an index not marked ready")
+    ix_sub.add_parser("rollback", help="point the alias back at the previous index")
+    drop = ix_sub.add_parser("drop", help="delete an index no alias points at")
+    drop.add_argument("name")
+    ix.set_defaults(func=cmd_index)
 
     hk = sub.add_parser("hash-key", help="create an API key, or hash an existing one")
     hk.add_argument("key", nargs="?")

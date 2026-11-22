@@ -16,4 +16,4 @@ HNSW filters after the graph search, so selective filters can return too few row
 
 ## Consequences
 
-Deletes leave dead tuples; milestone 4 adds an operations guide (autovacuum for `chunks`, `REINDEX INDEX CONCURRENTLY` after heavy churn).
+Deletes leave dead tuples. The operations guide, [docs/operations/pgvector.md](../operations/pgvector.md), covers autovacuum for `chunks`, `REINDEX INDEX CONCURRENTLY` after heavy churn, and tuning these settings.

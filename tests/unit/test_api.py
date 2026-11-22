@@ -98,6 +98,21 @@ def test_forget_user(client):
     assert report["deleted"]["turns"] == 2
 
 
+def test_forget_user_also_erases_vectors_kept_outside_postgres(fake_components):
+    erased = []
+
+    class ErasingStore(type(fake_components.store)):
+        async def forget_user_documents(self, user_id: str) -> int:
+            erased.append(user_id)
+            return 3
+
+    fake_components.store = ErasingStore()
+    app = create_app(fake_components.settings, components=fake_components)
+    with TestClient(app) as c:
+        report = c.delete("/v1/users/u9/memory").json()
+    assert erased == ["u9"] and report["deleted"]["vector_points"] == 3
+
+
 def test_wrong_owner_gets_403(client):
     ingest_samples(client)
     first = client.post("/v1/chat", json={"message": "Where are notes stored?", "user_id": "a"})
