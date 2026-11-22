@@ -187,18 +187,26 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
     from chatbot.evals import gate as gates
 
-    report, settings = asyncio.run(_eval(args))
+    settings = get_settings()
     root, evals = settings.root_dir, settings.evals
     profile = _profile()
     baseline_path = root / evals.baselines_dir / f"{profile}.json"
-    result = None
+    rules = None
     if args.gate:
-        rules = gates.load_rules(root / evals.gate, profile)
-        result = gates.check(report.summary, rules, gates.load_baseline(baseline_path))
+        # Before the run, not after: a profile with no gate must not cost a full eval.
+        try:
+            rules = gates.load_rules(root / evals.gate, profile)
+        except ValueError as exc:
+            sys.exit(f"{exc}. Add the profile to {evals.gate}, or run without --gate.")
+    report, _ = asyncio.run(_eval(args))
+    # The report is written before the gate is checked, so a failing run is still on disk.
     print(json.dumps({"summary": report.summary, "meta": report.meta}, indent=2))
     if args.out:
         Path(args.out).write_text(report.model_dump_json(indent=2))
         print(f"full report: {args.out}", file=sys.stderr)
+    result = None
+    if rules is not None:
+        result = gates.check(report.summary, rules, gates.load_baseline(baseline_path))
     if args.update_baseline:
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
         baseline_path.write_text(

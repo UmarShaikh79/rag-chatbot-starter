@@ -10,6 +10,17 @@ matters, how to bring the change into a copy you have already modified.
   image-only deployment (Compose without uv on the host, Kubernetes) could not calibrate its
   thresholds. A unit test checks that the Dockerfile copies every folder the app reads at
   runtime. In a copy you have modified: add `COPY evals ./evals` to `docker/Dockerfile`.
+- Fix: clarifying questions were refused as prompt leaks. `clarify/v1` puts the knowledge-base
+  topics into the system prompt and asks the model to mention them; the prompt-leak check
+  compared answers with the rendered system prompt, so a model that listed the topics (every
+  time with `gemma3:4b`) got "Sorry, I can't help with that request." The check now compares
+  with the template's own wording only (`PromptTemplate.system_literals()`, passed to the guard
+  as `system_prompt_parts`); repeating the instructions is still refused. In a copy you have
+  modified: take `system_literals`, the `PromptLeakGuard.check` change and the extra
+  `_check_output` argument; custom guards that read `system_prompt` keep working.
+- Fix: `chatbot eval --gate` for a profile with no entry in `evals/gate.yaml` ran the whole
+  eval and then crashed before writing the report. It now fails at once, and the report
+  (`--out`) is written before the gate is checked, so a failing run is never lost.
 - First live run of the `dev` profile (OpenAI). The model IDs `gpt-6.2-sol` and `gpt-6-luna`
   are confirmed, and `config/models.yaml` now has prices (standard tier, 2026-11-22), so
   `cost_usd` is filled in. `evals/baselines/dev.json` records the first measured run:

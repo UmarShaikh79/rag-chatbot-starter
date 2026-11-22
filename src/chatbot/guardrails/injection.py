@@ -255,7 +255,10 @@ def _shingles(text: str, n: int) -> set[tuple[str, ...]]:
 class PromptLeakGuard:
     """Output check: refuses an answer that repeats a run of the system prompt verbatim.
 
-    The orchestrator passes the rendered system prompt as ``metadata["system_prompt"]``.
+    The orchestrator passes the rendered system prompt as ``metadata["system_prompt"]`` and
+    the template's own wording as ``metadata["system_prompt_parts"]`` (the text between its
+    placeholders). When the parts are there, only they count: values filled into the prompt,
+    such as the topic list the clarify prompt asks the model to mention, are not the prompt.
     ``window`` consecutive words in common counts as a leak.
     """
 
@@ -266,8 +269,14 @@ class PromptLeakGuard:
         self.window = window
 
     async def check(self, payload: GuardPayload) -> GuardResult:
-        system = str(payload.metadata.get("system_prompt") or "")
-        if system and _shingles(payload.text, self.window) & _shingles(system, self.window):
+        parts = payload.metadata.get("system_prompt_parts")
+        if parts is None:
+            system = str(payload.metadata.get("system_prompt") or "")
+            parts = [system] if system else []
+        prompt: set[tuple[str, ...]] = set()
+        for part in parts:  # one part at a time: a run never spans a filled-in value
+            prompt |= _shingles(str(part), self.window)
+        if prompt and _shingles(payload.text, self.window) & prompt:
             return GuardResult(action="block", text=payload.text, reasons=["prompt_leak"])
         return GuardResult(action="allow", text=payload.text)
 
