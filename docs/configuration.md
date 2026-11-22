@@ -155,7 +155,8 @@ Summaries and facts reach the model through the `memory` variable of `answer/v2`
 `input.max_chars`, `input.pii_redaction`, `input.injection_check`, `context.injection_check`
 (drops retrieved chunks that look like instructions; also screens long-term facts),
 `output.pii_redaction`, `output.prompt_leak_check` (refuses an answer that repeats ten or more
-consecutive words of the system prompt), and `stream_holdback_chars` (64): how far the streaming
+consecutive words of the system prompt's own wording; values filled into the prompt, such as
+the topic list in `clarify/v1`, do not count), and `stream_holdback_chars` (64): how far the streaming
 redactor stays behind the model so PII is never split across two events. Output checks run on
 the complete answer in both stream modes.
 
@@ -240,7 +241,7 @@ TOKEN=$(uv run chatbot dev-token --sub alice)
 | Key | Default | Notes |
 | --- | --- | --- |
 | `dataset` | `evals/datasets/golden.jsonl` | One question per line; see `evals/README.md`. |
-| `gate` | `evals/gate.yaml` | Floors per profile, checked by `chatbot eval --gate`. |
+| `gate` | `evals/gate.yaml` | Floors per profile, checked by `chatbot eval --gate`. A profile with no entry fails at once, before the run. |
 | `baselines_dir` | `evals/baselines` | `<profile>.json`, written by `--update-baseline`. |
 | `hit_at` | `[1, 3]` | Extra hit@k columns besides hit@top_k. |
 | `faithfulness_judge` | `llm` | `llm`, `lexical` (offline profile) or `off`. |

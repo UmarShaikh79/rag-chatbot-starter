@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from chatbot.core.settings import load_settings
 from chatbot.evals import metrics as m
 from chatbot.evals.calibrate import sweep
 from chatbot.evals.commands import calibrate, evaluate
@@ -131,3 +132,57 @@ async def test_calibrate_stores_thresholds_for_the_pipeline():
     assert result.best.answer_recall >= 0.9
     report = await evaluate(c, retrieval_only=True)
     assert report.meta["calibrated"] is True
+
+
+def _eval_args(tmp_path, **kw):
+    import argparse
+
+    defaults = {
+        "dataset": None,
+        "retrieval_only": False,
+        "gate": True,
+        "out": None,
+        "update_baseline": False,
+    }
+    return argparse.Namespace(**{**defaults, **kw})
+
+
+def test_eval_gate_for_unknown_profile_fails_before_running(tmp_path, monkeypatch):
+    """Regression: a profile with no gate entry used to fail only after the whole run."""
+    from chatbot import cli
+
+    gate = tmp_path / "gate.yaml"
+    gate.write_text("profiles:\n  dev:\n    min: {}\n")
+    monkeypatch.setenv("CHATBOT_PROFILE", "offline")
+    monkeypatch.setenv("CHATBOT__EVALS__GATE", str(gate))
+    monkeypatch.setattr(cli, "get_settings", load_settings)  # not the cached copy
+
+    async def must_not_run(args):
+        raise AssertionError("the eval ran before the gate rules were checked")
+
+    monkeypatch.setattr(cli, "_eval", must_not_run)
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_eval(_eval_args(tmp_path))
+    assert "no gate for profile 'offline'" in str(exc.value)
+
+
+def test_eval_report_is_written_even_when_the_gate_fails(tmp_path, monkeypatch):
+    from chatbot import cli
+    from chatbot.evals.runner import EvalReport
+
+    gate = tmp_path / "gate.yaml"
+    gate.write_text("profiles:\n  offline:\n    min:\n      retrieval.hit@3: 0.99\n")
+    monkeypatch.setenv("CHATBOT_PROFILE", "offline")
+    monkeypatch.setenv("CHATBOT__EVALS__GATE", str(gate))
+    monkeypatch.setattr(cli, "get_settings", load_settings)  # not the cached copy
+    monkeypatch.setenv("CHATBOT__EVALS__BASELINES_DIR", str(tmp_path))
+
+    async def fake_eval(args):
+        return EvalReport(summary={"retrieval.hit@3": 0.5}, retrieval=[]), None
+
+    monkeypatch.setattr(cli, "_eval", fake_eval)
+    out = tmp_path / "report.json"
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_eval(_eval_args(tmp_path, out=str(out)))
+    assert exc.value.code == 1
+    assert json.loads(out.read_text())["summary"]["retrieval.hit@3"] == 0.5

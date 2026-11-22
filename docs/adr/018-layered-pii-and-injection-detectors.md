@@ -8,7 +8,7 @@ PII and injection checks are chains of detectors chosen in config and registered
 
 - PII: `regex` (default; emails, phones, cards with Luhn, IBANs, US SSNs, IPv4) and `presidio` (optional extra; names, places and more via spaCy NER). Spans from every detector are merged, then replaced with `[LABEL]`. One configured redactor serves the input guard, the output guard, the streaming redactor, persistence and memory. `guardrails.pii.allow` lists strings never redacted (a public support address).
 - Injection: `heuristic` (default; rules run on NFKC-normalised text with zero-width characters removed, leetspeak and spaced-out letters undone and short base64 payloads decoded, plus rules for a few other languages and for link-based exfiltration) and `llm` (optional; a classifier prompt on the `cheap` model, input stage only by default, with a fail-open or fail-closed setting). Cheap detectors run first; the model is not called once a rule fires.
-- Output: on the complete answer, in every stream mode, PII redaction and a prompt-leak check (ten consecutive words shared with the system prompt make the answer a refusal).
+- Output: on the complete answer, in every stream mode, PII redaction and a prompt-leak check (ten consecutive words shared with the system prompt make the answer a refusal). Only the template's own wording counts, not values filled into it: the clarify prompt passes in topic titles and asks the model to mention them, which is not a leak (fixed after the first live run with local models).
 
 ## Alternatives considered
 

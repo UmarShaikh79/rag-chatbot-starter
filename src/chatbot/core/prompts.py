@@ -38,6 +38,14 @@ class PromptTemplate(BaseModel):
                     found.add(field)
         return found
 
+    def system_literals(self) -> list[str]:
+        """The system prompt's own wording: the text between placeholders, without the
+        values filled in at render time. The prompt-leak check compares answers against
+        these, so an answer that repeats data the prompt passed in (topic titles, memory)
+        is not mistaken for a leaked prompt."""
+        parts = (literal.strip() for literal, *_ in string.Formatter().parse(self.system))
+        return [p for p in parts if p]
+
     def render(self, **values: Any) -> list[Message]:
         missing = set(self.variables) - values.keys()
         if missing:

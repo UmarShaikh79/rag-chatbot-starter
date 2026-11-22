@@ -298,3 +298,27 @@ async def test_pipeline_uses_configured_redactor_everywhere():
     out = await guards.run("output", "Mail help@tidepool.example, not bob@x.io")
     assert out.text == "Mail help@tidepool.example, not [EMAIL]"
     assert guards.redactor.redact("bob@x.io")[0] == "[EMAIL]"
+
+
+async def test_prompt_leak_guard_ignores_values_filled_into_the_prompt():
+    """The clarify prompt passes in topic titles and asks the model to mention them: repeating
+    them is not a leak, repeating the prompt's own wording still is."""
+    from chatbot.core.prompts import PromptRegistry
+    from chatbot.core.types import GuardPayload
+    from chatbot.guardrails.injection import PromptLeakGuard
+    from tests.conftest import ROOT
+
+    template = PromptRegistry(ROOT / "prompts").get("clarify/v1")
+    topics = "Getting started, Plans and billing, Privacy and data, Refund policy, Sharing"
+    system = template.render(question="q", history="h", memory="m", topics=topics)[0].content
+    meta = {"system_prompt": system, "system_prompt_parts": template.system_literals()}
+    guard = PromptLeakGuard()
+
+    echo = f"Our knowledge base covers {topics}. Which of these is closest to what you need?"
+    without_parts = await guard.check(GuardPayload(text=echo, metadata={"system_prompt": system}))
+    assert without_parts.action == "block"  # the old behaviour: the false positive
+    assert (await guard.check(GuardPayload(text=echo, metadata=meta))).action == "allow"
+
+    leak = "Ask ONE short clarifying question that would help find the right information."
+    blocked = await guard.check(GuardPayload(text=leak, metadata=meta))
+    assert blocked.action == "block" and blocked.reasons == ["prompt_leak"]

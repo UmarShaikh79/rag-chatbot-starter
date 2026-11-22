@@ -204,3 +204,55 @@ async def test_prompt_leak_check_can_be_switched_off():
     c = await build(FakeLLM(script=[leak]), guardrails={"output": {"prompt_leak_check": False}})
     resp = await c.orchestrator.run(ChatRequest(message="How long is the refund window?"))
     assert resp.kind == "answer"
+
+
+class TopicEchoLLM(FakeLLM):
+    """A cheap model that does what the clarify prompt asks: lists the topics it was given."""
+
+    def _reply(self, messages, purpose):
+        if purpose != "clarify":
+            return super()._reply(messages, purpose)
+        self.calls.append(messages)
+        topics = messages[0].content.rsplit("covers:", 1)[1].strip()
+        return f"Our knowledge base covers {topics}. Which of these is closest to your question?"
+
+
+async def build_with_cheap(cheap: FakeLLM):
+    settings = offline_settings()
+    c = container.build(
+        settings,
+        pool=None,
+        answer_llm=FakeLLM(),
+        cheap_llm=cheap,
+        embedder=HashingEmbedder(384),
+        store=InMemoryVectorStore(),
+        memory=InMemoryMemoryStore(),
+        queue=InMemoryJobQueue(),
+    )
+    await c.pipeline.sync_source(make_source(settings, "samples"))
+    return c
+
+
+async def test_clarifying_question_that_lists_topics_is_not_a_leak():
+    """Regression: the topic titles live in the clarify system prompt, so a clarifying question
+    that mentions them, as the prompt asks, used to be refused as a prompt leak."""
+    cheap = TopicEchoLLM()
+    c = await build_with_cheap(cheap)
+    evs = await events(c, "zebra quantum harmonica lessons")
+    assert_contract(evs)
+    data = evs[-1].data
+    assert data["kind"] == "clarify", data
+    assert "prompt_leak" not in data["warnings"]
+    topics = cheap.calls[-1][0].content.rsplit("covers:", 1)[1].strip()
+    assert len(topics.split()) >= 10  # long enough to have tripped the old check
+    assert topics in data["answer"]
+
+
+async def test_clarify_that_repeats_its_instructions_is_still_refused():
+    leak = (
+        "Ask ONE short clarifying question that would help find the right information. "
+        "Do not answer the question and do not guess facts."
+    )
+    c = await build_with_cheap(FakeLLM(script=[leak]))
+    resp = await c.orchestrator.run(ChatRequest(message="zebra quantum harmonica lessons"))
+    assert resp.kind == "refuse" and "prompt_leak" in resp.warnings

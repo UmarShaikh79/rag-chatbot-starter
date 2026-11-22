@@ -24,7 +24,7 @@ from typing import Any
 
 from chatbot.core.errors import ChatbotError
 from chatbot.core.interfaces import LLM, MemoryStore, Retriever
-from chatbot.core.prompts import PromptRegistry
+from chatbot.core.prompts import PromptRegistry, PromptTemplate
 from chatbot.core.registry import registry
 from chatbot.core.settings import Settings
 from chatbot.core.types import (
@@ -151,11 +151,19 @@ class SimpleOrchestrator:
         if self.memory_manager is not None and kind != "refuse":
             await self.memory_manager.after_turn(ctx)
 
-    async def _check_output(self, text: str, messages: list[Message]) -> tuple[str, list[str]]:
-        """Output guards on the complete text. Returns (text, block reasons)."""
+    async def _check_output(
+        self, text: str, messages: list[Message], template: PromptTemplate | None = None
+    ) -> tuple[str, list[str]]:
+        """Output guards on the complete text. Returns (text, block reasons).
+
+        ``template`` is the prompt that produced ``messages``: the prompt-leak check compares
+        against its own wording, not against values filled into it (ADR 014)."""
         system = next((m.content for m in messages if m.role == "system"), "")
+        metadata: dict[str, Any] = {"system_prompt": system}
+        if template is not None:
+            metadata["system_prompt_parts"] = template.system_literals()
         with span("output guards", type="guardrail") as s:
-            result = await self.guards.run("output", text, {"system_prompt": system})
+            result = await self.guards.run("output", text, metadata)
             s.set({"chatbot.guard.action": result.action, "chatbot.guard.reasons": result.reasons})
         if result.action == "block":
             log.warning("output blocked", extra={"reasons": result.reasons})
@@ -404,7 +412,7 @@ class SimpleOrchestrator:
                 else:
                     text = piece
                     st.usage = st.usage.add(priced(u or Usage(), self.prices["cheap"]))
-            text, blocked = await self._check_output(text.strip(), messages)
+            text, blocked = await self._check_output(text.strip(), messages, prompt)
             await self._finish(st, text, "refuse" if blocked else "clarify", warnings=blocked)
 
     async def answer(self, st: TurnState) -> AsyncIterator[ChatEvent]:
@@ -478,7 +486,9 @@ class SimpleOrchestrator:
 
     async def check_output(self, st: TurnState) -> None:
         """Output guards on the complete text, then persist and finish."""
-        answer, blocked = await self._check_output(st.answer, st.messages)
+        answer, blocked = await self._check_output(
+            st.answer, st.messages, self.prompts.get(self.settings.answer.prompt)
+        )
         if blocked:
             await self._finish(st, answer, "refuse", warnings=blocked)
             return

@@ -37,3 +37,15 @@ def test_prompt_render_is_strict():
         p.render(a=1)
     with pytest.raises(KeyError, match="missing"):
         PromptTemplate(name="t", version=1, variables=["a"], system="{a}", user="").render()
+
+
+def test_system_literals_leave_out_filled_in_values():
+    prompts = PromptRegistry(ROOT / "prompts")
+    clarify = prompts.get("clarify/v1")
+    parts = clarify.system_literals()
+    assert parts and all("{" not in p for p in parts)
+    rendered = clarify.render(question="q", history="h", memory="m", topics="Alpha, Beta")
+    assert "Alpha, Beta" in rendered[0].content
+    assert not any("Alpha" in p for p in parts)
+    answer = prompts.get("answer/v2")  # no placeholders in its system text: one part
+    assert answer.system_literals() == [answer.system.strip()]
