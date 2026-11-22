@@ -37,7 +37,7 @@ jobs:
         run: echo "No OPENAI_API_KEY secret; nothing to do."
       - uses: actions/checkout@v7
         if: env.OPENAI_API_KEY != ''
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         if: env.OPENAI_API_KEY != ''
         with:
           python-version: "3.12"
