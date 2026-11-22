@@ -47,3 +47,17 @@ profiles:
     max:
       errors: 0
     max_drop: 0.05
+
+  # Local models (Ollama: qwen3.5:9b, gemma3:4b, nomic-embed-text). The first measured run
+  # (2026-11-22, baselines/local-ollama.json) matched or beat dev on every quality metric,
+  # so the floors are the same; only latency differs (p50 about 22 s on an Apple M1).
+  local-ollama:
+    min:
+      retrieval.hit@3: 0.9
+      answer.answer_rate: 0.85
+      answer.must_include_rate: 0.8
+      answer.faithfulness: 0.9
+      abstention.unanswerable_rate: 0.8
+    max:
+      errors: 0
+    max_drop: 0.05
