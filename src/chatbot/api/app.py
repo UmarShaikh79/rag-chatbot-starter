@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from chatbot import __version__
 from chatbot.api.middleware import UNTRACED, TraceMiddleware
@@ -90,8 +92,17 @@ def create_app(
     app.include_router(memory.router, dependencies=protected)
     app.include_router(usage.router, dependencies=admin_only)
 
-    def error(status: int, message: str) -> JSONResponse:
-        return JSONResponse({"detail": message, "trace_id": get_trace_id()}, status_code=status)
+    def error(status: int, message: Any, headers: Mapping[str, str] | None = None) -> JSONResponse:
+        return JSONResponse(
+            {"detail": message, "trace_id": get_trace_id()}, status_code=status, headers=headers
+        )
+
+    # Raised by routes and dependencies (auth 401/403/503, 404s): the same body as the
+    # errors below, so every error carries the trace ID. Headers (WWW-Authenticate,
+    # Retry-After) are kept.
+    @app.exception_handler(StarletteHTTPException)
+    async def _http(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        return error(exc.status_code, exc.detail, exc.headers)
 
     @app.exception_handler(ForbiddenError)
     async def _forbidden(_: Request, exc: ForbiddenError) -> JSONResponse:

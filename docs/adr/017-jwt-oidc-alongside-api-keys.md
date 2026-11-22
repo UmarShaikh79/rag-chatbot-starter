@@ -24,3 +24,10 @@ Front ends (SPA, mobile) can call the API directly with the token they already h
 ## Consequences
 
 The service needs outbound HTTPS to the identity provider's JWKS. Token revocation is only as fast as token expiry. Mapping provider-specific role claims to scopes is left to the template's owner (`chatbot/auth/jwt.py`).
+
+Addendum (first run against Keycloak 26.4): everything above held. One change: when the
+signing keys cannot be fetched and none are cached, the API answers 503 with `Retry-After`
+instead of 401 (`KeysUnavailable`), because front ends sign users out on 401 and an
+identity-provider outage would sign out everyone. Auth errors now carry `trace_id` like the
+other errors. The 30 s minimum between key refetches stays; `docs/configuration.md` says how
+to rotate keys in Keycloak without tripping it.

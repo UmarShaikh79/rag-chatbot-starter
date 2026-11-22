@@ -231,6 +231,17 @@ JWT/OIDC (ADR 017): clients send the access token from your identity provider as
 | `jwt.leeway_s` | 30 | Clock skew allowed on `exp`, `nbf`, `iat`. |
 | `jwt.jwks_cache_s` | 3600 | Key cache lifetime. An unknown `kid` triggers one early refetch. |
 
+If the provider is unreachable and no keys are cached yet (an API restart during an outage),
+token requests get 503 with `Retry-After: 30`, not 401, so front ends don't sign users out.
+Once keys are cached, an outage doesn't affect tokens until `jwks_cache_s` runs out.
+
+Rotating signing keys: an unknown `kid` refetches the keys at most once every 30 seconds
+(so junk tokens can't make the API hammer your provider). Publish a new key before tokens use
+it, as Auth0, Okta and Entra ID do. In Keycloak, add the new key with a lower priority than
+the current one, wait at least `jwks_cache_s` (every API instance then has it cached), then
+raise its priority; a key that becomes active at once can fail tokens for up to 30 seconds.
+A key you remove is still trusted until `jwks_cache_s` runs out.
+
 Example for Auth0 (other providers differ only in the issuer URL):
 
 ```yaml

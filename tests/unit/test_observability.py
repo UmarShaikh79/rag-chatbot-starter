@@ -108,9 +108,11 @@ async def test_chat_turn_is_one_trace_with_steps_and_a_generation(otel):
     assert emb.attributes["chatbot.purpose"] == "query"
 
     # User and session are on every span (Langfuse filters need that).
+    # On a first turn too: the conversation ID exists before the first span opens.
     for s in spans:
         assert s.attributes[USER_ATTR] == "u-7"
-    assert root.attributes[SESSION_ATTR] == resp.conversation_id
+        assert s.attributes[SESSION_ATTR] == resp.conversation_id, s.name
+    assert root.attributes["chatbot.conversation.new"] is True
     # Text is off by default.
     assert not any(INPUT_ATTR in s.attributes or OUTPUT_ATTR in s.attributes for s in spans)
 

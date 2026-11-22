@@ -36,3 +36,9 @@ Langfuse is for) and `observability.otel.capture_text` is off.
 - Langfuse's OTLP endpoint needs Langfuse >= 3.22 when self-hosted, and HTTP (no gRPC).
 - The attribute names come from Langfuse's OpenTelemetry docs (read 2026-11-22). If Langfuse
   renames them, only `chatbot.observability.tracing` and `instrument` change.
+
+Addendum (first run against self-hosted Langfuse 4.83): the export works unchanged. The first
+turn of a conversation had its session only on the root span, because the conversation ID was
+made inside the orchestrator after the first spans opened. `MeteredOrchestrator` now assigns
+it before the root span (a memory store already treats an unseen ID as a new conversation),
+so every span of every turn carries the session, as stated above.

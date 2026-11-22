@@ -5,6 +5,22 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: with JWT auth, an identity-provider outage while no signing keys were cached (for
+  example an API restart during the outage) answered valid tokens with 401, which many front
+  ends treat as "sign out". It is now 503 with `Retry-After: 30` (`KeysUnavailable` in
+  `auth/jwt.py`, handled in `auth/api_key.py`). Bad tokens are still 401.
+- Fix: errors raised as `HTTPException` (auth 401/403/503, route 403/404) returned
+  `{"detail": ...}` without the `trace_id` that `docs/api.md` promises; `api/app.py` now
+  handles them like the other errors, keeping their headers.
+- Fix: on the first turn of a conversation only the root span carried the session
+  (`langfuse.session.id`), so Langfuse filters by session missed that turn's steps.
+  `MeteredOrchestrator` now assigns the conversation ID before the turn's first span. A
+  custom orchestrator now receives a `conversation_id` on first turns too;
+  `chatbot.conversation.new` on the root span still says whether it is new.
+- Docs: rotating keys in Keycloak without the 30 s refetch limit failing tokens; user and
+  session IDs are on every OpenTelemetry span, whatever `capture_text` says; running
+  Langfuse's Compose file next to this one. First live runs against Keycloak 26.4 and
+  self-hosted Langfuse 4.83 recorded in ADR 017 and ADR 027.
 - Fix: the Kubernetes prod overlay's ingress host placeholder `chatbot.YOUR_DOMAIN` is not a
   valid host name, so `kubectl apply -k deploy/k8s/overlays/prod --dry-run=server` (the
   README's own check) always failed; kubeconform in CI does not check host values. The
