@@ -5,6 +5,14 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: questions with `filters` were judged weak against a `min_hits` calibrated on the whole
+  corpus. A filter to one document (one customer, one product) rarely has two strong chunks,
+  so with a calibrated `min_hits` of 2 such questions always got a clarifying question, even
+  with a strong match. New setting `retrieval.min_hits_filtered` (default 1) applies to
+  filtered requests, and `min_hits` is never more than the number of chunks retrieval
+  returned. `min_score` is unchanged. In a copy you have modified: take the `assess` change in
+  `retrieval/weak.py`, the two new arguments at its call in `orchestration/simple.py`, and the
+  setting; set `min_hits_filtered: null` to keep the old behaviour.
 - Fix: the Docker image now includes `evals/`. Before, `chatbot calibrate` and `chatbot eval`
   failed inside a container (`FileNotFoundError: /app/evals/datasets/golden.jsonl`), so an
   image-only deployment (Compose without uv on the host, Kubernetes) could not calibrate its

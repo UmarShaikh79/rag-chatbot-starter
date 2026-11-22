@@ -113,6 +113,7 @@ any of these changes the chunker version, so the next sync re-chunks every docum
 | `rerank.model` | `cohere:rerank` | A name under `rerankers` in `config/models.yaml`: `cohere:rerank` (`COHERE_API_KEY`), `local:bge-reranker-base` (`uv sync --extra rerank`), `lexical:overlap` (tests). |
 | `gate` | `auto` | The score `min_score` applies to: `rerank` when reranking, else `dense`, else `bm25`. Never the fused RRF score. |
 | `min_score` / `min_hits` | 0.35 / 1 | Provisional, always applied together (ADR 011). |
+| `min_hits_filtered` | 1 | `min_hits` for requests with `filters`: a filter searches a slice of the corpus, so fewer chunks can agree. `min_score` still applies; `null` keeps `min_hits`. `min_hits` is also never more than the number of chunks retrieval returned. |
 | `thresholds_from` | `index` | Calibrated values stored for this index and pipeline win; `config` forces these values. |
 
 Calibrated thresholds are stored per index and **scorer** (the gate plus the pipeline, e.g.

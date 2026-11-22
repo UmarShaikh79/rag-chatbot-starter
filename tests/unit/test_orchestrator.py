@@ -256,3 +256,32 @@ async def test_clarify_that_repeats_its_instructions_is_still_refused():
     c = await build_with_cheap(FakeLLM(script=[leak]))
     resp = await c.orchestrator.run(ChatRequest(message="zebra quantum harmonica lessons"))
     assert resp.kind == "refuse" and "prompt_leak" in resp.warnings
+
+
+async def test_filtered_question_uses_min_hits_filtered():
+    """A filtered request is held to retrieval.min_hits_filtered, not to a min_hits calibrated
+    on the whole corpus. The filter matches every sample chunk, so retrieval still returns a
+    full top_k and only the filter rule is in play. The fake LLM is extractive: this checks
+    the gate, not answer quality."""
+    q = "How long is the refund window for annual plans?"
+    flt = {"source": "samples"}
+    strict = await build(retrieval={"min_hits": 8, "min_hits_filtered": None})
+    assert (await strict.orchestrator.run(ChatRequest(message=q, filters=flt))).kind == "clarify"
+    relaxed = await build(retrieval={"min_hits": 8})  # min_hits_filtered: 1 (default)
+    resp = await relaxed.orchestrator.run(ChatRequest(message=q, filters=flt))
+    assert resp.kind == "answer"
+    assert (await relaxed.orchestrator.run(ChatRequest(message=q))).kind == "clarify"
+
+
+async def test_min_hits_capped_when_a_filter_leaves_few_chunks():
+    """Regression: a filter to one document returns fewer chunks than top_k; requiring more
+    strong hits than exist made every such question clarify."""
+    c = await build(retrieval={"min_hits": 8, "min_hits_filtered": None})
+    flt = {"document_id": "samples:refund-policy.md"}
+    n = sum(len(v) for (_, doc), v in c.store.chunks.items() if doc == flt["document_id"])
+    assert 0 < n < 8
+    resp = await c.orchestrator.run(
+        ChatRequest(message="How long is the refund window for annual plans?", filters=flt)
+    )
+    assert resp.kind == "answer"
+    assert {ci.document_id for ci in resp.citations} == {"samples:refund-policy.md"}

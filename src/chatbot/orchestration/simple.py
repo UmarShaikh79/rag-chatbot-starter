@@ -329,6 +329,8 @@ class SimpleOrchestrator:
             )
             s.set({"chatbot.retrieval.hits": len(hits)})
             s.io(output=[{"id": h.chunk.id, "score": round(h.score, 4)} for h in hits])
+        # Counted before the context guard: dropping a suspicious chunk must not lower the bar.
+        retrieved = len(hits)
         if self.guards.stage("context"):
             safe: list[ScoredChunk] = []
             with span("context guards", type="guardrail") as s:
@@ -357,6 +359,8 @@ class SimpleOrchestrator:
             calibration,
             gate=getattr(self.retriever, "gate", None),
             warn_key=f"{index.name}:{scorer}" if index is not None else None,
+            filtered=bool(st.request.filters),
+            available=retrieved if retrieved < cfg.retrieval.top_k else None,
         )
         top = round(hits[0].score, 4) if hits else None
         log.info(
@@ -364,6 +368,7 @@ class SimpleOrchestrator:
             extra={
                 "hits": len(hits),
                 "strong": len(verdict.strong),
+                "min_hits": verdict.min_hits,
                 "weak": verdict.weak,
                 "gate": verdict.gate,
                 "top_score": top,

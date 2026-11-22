@@ -36,3 +36,10 @@ by the full pipeline makes "you changed the pipeline, recalibrate" impossible to
 - Calibrating and evaluating on the same questions flatters both; with a larger set, hold
   part of it out for `chatbot eval`.
 - Migration 0003 moves milestone 1 values to scorer `dense|dense` and drops the old columns.
+
+Addendum (after the first Qdrant run): `min_hits` is calibrated on the whole corpus, so it
+is lowered for requests that search less of it: to `retrieval.min_hits_filtered` (default 1)
+when the request has filters, and never above the number of chunks retrieval returned.
+Without this, a question filtered to one document (one customer, one product) was judged weak
+whenever that document had fewer strong chunks than the corpus-wide `min_hits`. `min_score` is
+never relaxed.
