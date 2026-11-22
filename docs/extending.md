@@ -1,5 +1,10 @@
 # Extending the template
 
+Short recipes, one per kind of part. New to the codebase? Read the
+[architecture tour](architecture.md) first, and follow the [tutorial](tutorial.md) for one
+complete example (a new retriever, registered, configured, calibrated and tested). Each
+[feature guide](README.md#feature-guides) has an "Extend it" section with more context.
+
 Every swappable part is a `typing.Protocol` in `src/chatbot/core/interfaces.py`. Implementations
 register a factory under a name; config picks the name; `core/container.py` builds the parts.
 Put your code in `src/chatbot/domain/` (imported last, so your registrations override built-ins)

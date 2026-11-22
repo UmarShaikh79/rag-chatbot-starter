@@ -35,7 +35,8 @@ Laravel or .NET site, a Shopify store, a Slack bot of your own.
 > **New to RAG?** RAG (retrieval-augmented generation) means: find the passages in your documents
 > that answer a question, then let a language model write the answer from those passages only.
 > This repo is a complete, readable example of doing that properly. Start with the
-> [quick start](#quick-start-no-api-key-needed); you don't need an API key.
+> [quick start](#quick-start-no-api-key-needed) (no API key needed), then the
+> [architecture tour](docs/architecture.md) and the [glossary](docs/glossary.md).
 
 ## See it answer
 
@@ -379,8 +380,13 @@ Kubernetes manifests and the eval gate all run in CI on every pull request.
 
 ## Docs
 
+All docs, by reader: **[docs home](docs/README.md)**.
+
 | If you want to | Read |
 | --- | --- |
+| Understand how it works | [Architecture](docs/architecture.md) · [Glossary](docs/glossary.md) |
+| Build your first change | [Tutorial: add your own retriever](docs/tutorial.md) |
+| Work on one feature | [Feature guides](docs/README.md#feature-guides) |
 | See every setting | [Configuration reference](docs/configuration.md) |
 | Call it from your app | [HTTP API and streaming contract](docs/api.md) |
 | Add a source, retriever, scorer, model, guard or store | [Extending](docs/extending.md) |

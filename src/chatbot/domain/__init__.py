@@ -8,7 +8,8 @@ Examples:
     def make_crm_source(cfg, root_dir): ...
 
     @registry.register("retriever", "dense")     # replace the default retriever
-    def make_my_retriever(embedder, store, alias): ...
+    def make_my_retriever(embedder, store, alias, **kwargs): ...   # kwargs: settings=...
 
-See docs/extending.md.
+Import each module you add here (``from chatbot.domain import my_module``). Step by step:
+docs/tutorial.md; every kind of part: docs/extending.md.
 """

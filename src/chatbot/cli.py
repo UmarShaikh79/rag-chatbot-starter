@@ -114,14 +114,15 @@ async def _ingest(args: argparse.Namespace) -> dict[str, Any]:
                     )
                 reports[name] = report.model_dump(mode="json")
             return reports
-        jobs = {
-            name: await c.queue.enqueue(
+        max_attempts = c.settings.ingestion.worker.max_attempts  # as POST /v1/ingest does
+        jobs = {}
+        for name in names:
+            jobs[name] = await c.queue.enqueue(
                 SYNC_SOURCE,
                 {"source": name, "force": args.force},
                 dedup_key=f"{SYNC_SOURCE}:{name}",
+                max_attempts=max_attempts,
             )
-            for name in names
-        }
         if not args.wait:
             return {"queued": jobs}
         await Worker(c.queue, make_handlers(c), usage_store=c.usage_store).drain()

@@ -58,8 +58,9 @@ WEAK_REFUSAL_TEXT = "I couldn't find information about that in the knowledge bas
 
 
 def _could_become(prefix: str, text: str) -> bool:
-    """True while ``text`` (so far) could still be, or already is, ``prefix``: "ABS" could
-    become "ABSTAIN", and "ABSTAIN: ..." already starts with it."""
+    """True while ``text`` (so far) could still be, or already is, ``prefix``: "INSUFF" could
+    become "INSUFFICIENT_CONTEXT" (the answer prompt's abstain marker), and
+    "INSUFFICIENT_CONTEXT." already starts with it."""
     head = text.lstrip()
     return prefix.startswith(head) or head.startswith(prefix)
 
