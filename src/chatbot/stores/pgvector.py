@@ -10,6 +10,11 @@ Filtered search:
 * Other filters use HNSW with ``hnsw.iterative_scan`` so the scan keeps going until it has
   ``k`` rows that pass the filter, capped by ``hnsw.max_scan_tuples``. With
   ``relaxed_order`` results may be slightly out of order, so they are re-sorted here.
+
+Keyword search (ADR 020): every chunk also stores ``to_tsvector(text_config, text)`` and its
+length, and ``keyword_search`` scores Okapi BM25 in SQL with a GIN index for candidates. No
+extension needed. For tens of millions of chunks, swap in a dedicated engine (ParadeDB
+``pg_search``, OpenSearch) behind the same ``keyword_search`` method.
 """
 
 from __future__ import annotations
@@ -23,8 +28,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from chatbot.core.errors import IndexMismatchError
 from chatbot.core.registry import registry
-from chatbot.core.settings import HnswSection, Settings
-from chatbot.core.types import Chunk, IndexInfo, ParsedDocument, ScoredChunk
+from chatbot.core.settings import Bm25Options, HnswSection, Settings
+from chatbot.core.types import Calibration, Chunk, IndexInfo, ParsedDocument, ScoredChunk
 from chatbot.db import vector_literal
 
 log = logging.getLogger(__name__)
@@ -37,11 +42,18 @@ def physical_name(alias: str, model: str, dims: int) -> str:
 
 class PgVectorStore:
     def __init__(
-        self, pool: AsyncConnectionPool, hnsw: HnswSection, exact_scan_threshold: int = 2000
+        self,
+        pool: AsyncConnectionPool,
+        hnsw: HnswSection,
+        exact_scan_threshold: int = 2000,
+        text_config: str = "english",
+        bm25: Bm25Options | None = None,
     ) -> None:
         self.pool = pool
         self.hnsw = hnsw
         self.exact_scan_threshold = exact_scan_threshold
+        self.text_config = text_config  # for new indexes; existing ones keep their own
+        self.bm25 = bm25 or Bm25Options()
 
     # ------------------------------------------------------------------ indexes
 
@@ -54,8 +66,7 @@ class PgVectorStore:
             embedding_model=row["embedding_model"],
             dims=row["dims"],
             chunker_version=row["chunker_version"],
-            min_score=row["min_score"],
-            min_hits=row["min_hits"],
+            text_config=row.get("text_config") or "english",
         )
 
     async def get_index(self, alias: str) -> IndexInfo | None:
@@ -85,11 +96,12 @@ class PgVectorStore:
             # Serialise concurrent creators of the same alias.
             await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (alias,))
             cur = await conn.execute(
-                """INSERT INTO vector_indexes (name, embedding_model, dims, chunker_version)
-                   VALUES (%s, %s, %s, %s)
+                """INSERT INTO vector_indexes (name, embedding_model, dims, chunker_version,
+                                              text_config)
+                   VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
                    RETURNING id""",
-                (name, embedding_model, dims, chunker_version),
+                (name, embedding_model, dims, chunker_version, self.text_config),
             )
             index_id = (await cur.fetchone())["id"]
             m, efc = int(self.hnsw.m), int(self.hnsw.ef_construction)
@@ -165,8 +177,9 @@ class PgVectorStore:
                 async with conn.cursor() as cur:
                     await cur.executemany(
                         """INSERT INTO chunks (index_id, id, document_id, position, text,
-                                               metadata, content_hash, embedding)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)""",
+                                               metadata, content_hash, embedding, tsv)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector,
+                                   to_tsvector(%s::regconfig, %s))""",
                         [
                             (
                                 index.id,
@@ -179,10 +192,19 @@ class PgVectorStore:
                                 ),
                                 c.content_hash,
                                 vector_literal(v),
+                                index.text_config,
+                                c.text,
                             )
                             for c, v in zip(chunks, vectors, strict=True)
                         ],
                     )
+                await conn.execute(
+                    """UPDATE chunks SET doc_len = (
+                           SELECT coalesce(sum(coalesce(array_length(u.positions, 1), 1)), 0)
+                           FROM unnest(chunks.tsv) u)
+                       WHERE index_id = %s AND document_id = %s""",
+                    (index.id, document.id),
+                )
 
     async def delete_document(self, index: IndexInfo, document_id: str) -> int:
         async with self.pool.connection() as conn:
@@ -273,6 +295,7 @@ class PgVectorStore:
                 ),
                 score=1.0 - float(r["distance"]),
                 retriever="dense",
+                scores={"dense": 1.0 - float(r["distance"])},
             )
             for r in rows
         ]
@@ -280,8 +303,118 @@ class PgVectorStore:
         log.debug("vector search", extra={"hits": len(hits), "exact": exact, "k": k})
         return hits
 
+    async def keyword_search(
+        self, index: IndexInfo, query: str, k: int, filters: dict[str, Any]
+    ) -> list[ScoredChunk]:
+        """Okapi BM25 over ``chunks.tsv``. Document frequencies and the average length are
+        computed per query from the index, so they never go stale after re-ingestion."""
+        where, params = self._where(index, filters)
+        k1, b = float(self.bm25.k1), float(self.bm25.b)
+        sql = f"""
+            WITH q AS (
+                SELECT DISTINCT u.lexeme
+                FROM unnest(to_tsvector(%s::regconfig, %s)) u
+                WHERE u.lexeme !~ '[\\\\]'
+            ),
+            stats AS (
+                SELECT count(*)::float8 AS n, coalesce(avg(doc_len), 0)::float8 AS avgdl
+                FROM chunks WHERE index_id = %s
+            ),
+            df AS (
+                SELECT q.lexeme,
+                       (SELECT count(*) FROM chunks d
+                        WHERE d.index_id = %s AND d.tsv @@ quote_literal(q.lexeme)::tsquery
+                       )::float8 AS df
+                FROM q
+            ),
+            cand AS (
+                SELECT c.* FROM chunks c
+                WHERE {where}
+                  AND c.tsv @@ (SELECT string_agg(quote_literal(lexeme), ' | ')::tsquery FROM q)
+            )
+            SELECT cand.id, cand.document_id, cand.position, cand.text, cand.metadata,
+                   cand.content_hash,
+                   sum(ln(1 + (stats.n - df.df + 0.5) / (df.df + 0.5))
+                       * (u.tf * ({k1} + 1))
+                       / (u.tf + {k1} * (1 - {b} + {b} * cand.doc_len
+                                           / greatest(stats.avgdl, 1)))) AS score
+            FROM cand CROSS JOIN stats
+            CROSS JOIN LATERAL (
+                SELECT x.lexeme, coalesce(array_length(x.positions, 1), 1) AS tf
+                FROM unnest(cand.tsv) x
+            ) u
+            JOIN df ON df.lexeme = u.lexeme
+            GROUP BY cand.id, cand.document_id, cand.position, cand.text, cand.metadata,
+                     cand.content_hash
+            ORDER BY score DESC, cand.id
+            LIMIT %s"""
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                sql, [index.text_config, query, index.id, index.id, *params, k]
+            )
+            rows = await cur.fetchall()
+        return [
+            ScoredChunk(
+                chunk=Chunk(
+                    id=r["id"],
+                    document_id=r["document_id"],
+                    position=r["position"],
+                    text=r["text"],
+                    metadata=r["metadata"],
+                    content_hash=r["content_hash"],
+                ),
+                score=float(r["score"]),
+                retriever="bm25",
+                scores={"bm25": float(r["score"])},
+            )
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------ calibration
+
+    async def get_calibration(self, index: IndexInfo, scorer: str) -> Calibration | None:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """SELECT scorer, min_score, min_hits, metrics, dataset, calibrated_at
+                   FROM retrieval_calibrations WHERE index_id = %s AND scorer = %s""",
+                (index.id, scorer),
+            )
+            row = await cur.fetchone()
+        return Calibration(**row) if row else None
+
+    async def save_calibration(self, index: IndexInfo, calibration: Calibration) -> None:
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """INSERT INTO retrieval_calibrations
+                       (index_id, scorer, min_score, min_hits, metrics, dataset, calibrated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, now())
+                   ON CONFLICT (index_id, scorer) DO UPDATE SET
+                     min_score = EXCLUDED.min_score, min_hits = EXCLUDED.min_hits,
+                     metrics = EXCLUDED.metrics, dataset = EXCLUDED.dataset,
+                     calibrated_at = now()""",
+                (
+                    index.id,
+                    calibration.scorer,
+                    calibration.min_score,
+                    calibration.min_hits,
+                    json.dumps(calibration.metrics),
+                    calibration.dataset,
+                ),
+            )
+
+    async def list_calibrations(self, index: IndexInfo) -> list[Calibration]:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """SELECT scorer, min_score, min_hits, metrics, dataset, calibrated_at
+                   FROM retrieval_calibrations WHERE index_id = %s ORDER BY scorer""",
+                (index.id,),
+            )
+            return [Calibration(**r) for r in await cur.fetchall()]
+
 
 @registry.register("vector_store", "pgvector")
 def make_pgvector_store(settings: Settings, pool: AsyncConnectionPool) -> PgVectorStore:
     vs = settings.vector_store
-    return PgVectorStore(pool, vs.hnsw, vs.exact_scan_threshold)
+    return PgVectorStore(
+        pool, vs.hnsw, vs.exact_scan_threshold, vs.text_search_config, settings.retrieval.bm25
+    )

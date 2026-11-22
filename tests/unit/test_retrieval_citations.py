@@ -1,5 +1,5 @@
 from chatbot.core.settings import RetrievalSection
-from chatbot.core.types import Chunk, IndexInfo, ScoredChunk
+from chatbot.core.types import Calibration, Chunk, ScoredChunk
 from chatbot.orchestration.citations import align, format_sources
 from chatbot.retrieval.weak import assess
 
@@ -16,39 +16,49 @@ def hit(score: float, i: int = 0) -> ScoredChunk:
     return ScoredChunk(chunk=chunk, score=score, retriever="dense")
 
 
-def index(min_score=None, min_hits=None) -> IndexInfo:
-    return IndexInfo(
-        id=1,
-        name="n",
-        alias="a",
-        embedding_model="m",
-        dims=3,
-        chunker_version="v",
-        min_score=min_score,
-        min_hits=min_hits,
-    )
+def calib(min_score: float, min_hits: int) -> Calibration:
+    return Calibration(scorer="dense|dense", min_score=min_score, min_hits=min_hits)
 
 
 def test_min_score_and_min_hits_apply_together():
     cfg = RetrievalSection(min_score=0.5, min_hits=2)
-    assert assess([hit(0.9), hit(0.4)], cfg, index()).weak  # only one strong hit
-    assert not assess([hit(0.9), hit(0.6)], cfg, index()).weak
-    assert assess([], cfg, index()).weak
+    assert assess([hit(0.9), hit(0.4)], cfg, None).weak  # only one strong hit
+    assert not assess([hit(0.9), hit(0.6)], cfg, None).weak
+    assert assess([], cfg, None).weak
 
 
-def test_calibrated_index_thresholds_win():
+def test_calibrated_thresholds_win():
     cfg = RetrievalSection(min_score=0.5, min_hits=1)
-    verdict = assess([hit(0.3)], cfg, index(min_score=0.25, min_hits=1))
+    verdict = assess([hit(0.3)], cfg, calib(0.25, 1))
     assert verdict.calibrated and not verdict.weak
     forced = assess(
-        [hit(0.3)], RetrievalSection(min_score=0.5, thresholds_from="config"), index(0.25, 1)
+        [hit(0.3)], RetrievalSection(min_score=0.5, thresholds_from="config"), calib(0.25, 1)
     )
     assert forced.weak and not forced.calibrated
 
 
 def test_uncalibrated_index_warns():
-    verdict = assess([hit(0.9)], RetrievalSection(), index())
+    verdict = assess([hit(0.9)], RetrievalSection(), None, warn_key="idx:dense|dense")
     assert not verdict.calibrated and verdict.warnings
+
+
+def test_gate_uses_the_named_score_not_the_fused_rank():
+    fused = hit(0.016).model_copy(
+        update={"retriever": "hybrid", "scores": {"rrf": 0.016, "dense": 0.7}}
+    )
+    bm25_only = hit(0.015, 1).model_copy(
+        update={"retriever": "hybrid", "scores": {"rrf": 0.015, "bm25": 9.0}}
+    )
+    low = hit(0.014, 2).model_copy(
+        update={"retriever": "hybrid", "scores": {"rrf": 0.014, "dense": 0.1}}
+    )
+    cfg = RetrievalSection(strategy="hybrid", min_score=0.5, min_hits=1)
+    verdict = assess([fused, bm25_only, low], cfg, None)
+    assert verdict.gate == "dense" and not verdict.weak
+    # The BM25-only hit has no dense score: usable once retrieval is strong, never "strong".
+    assert [h.chunk.id for h in verdict.strong] == ["c0"]
+    assert [h.chunk.id for h in verdict.usable] == ["c0", "c1"]
+    assert assess([bm25_only], cfg, None).weak
 
 
 def test_align_keeps_valid_markers_only():

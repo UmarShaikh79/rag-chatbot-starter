@@ -36,6 +36,11 @@ BUILTIN_MODULES = [
     "chatbot.ingestion.parsers",
     "chatbot.ingestion.chunkers.recursive",
     "chatbot.retrieval.dense",
+    "chatbot.retrieval.bm25",
+    "chatbot.providers.rerankers.lexical",
+    "chatbot.providers.rerankers.cohere",
+    "chatbot.providers.rerankers.cross_encoder",  # imports sentence-transformers lazily
+    "chatbot.guardrails.groundedness",
     "chatbot.guardrails.pii",
     "chatbot.guardrails.injection",
     "chatbot.domain",  # last: your overrides win
@@ -103,6 +108,8 @@ def build(
     from chatbot.memory.manager import MemoryManager
     from chatbot.memory.postgres import PostgresMemoryStore
     from chatbot.orchestration.simple import SimpleOrchestrator
+    from chatbot.retrieval.pipeline import build_pipeline
+    from chatbot.retrieval.rewrite import QueryRewriter
 
     def part(name: str, factory: Any) -> Any:
         return overrides[name] if name in overrides else factory()
@@ -116,18 +123,34 @@ def build(
         "store",
         lambda: registry.create("vector_store", settings.vector_store.backend, settings, pool),
     )
-    retriever = part(
-        "retriever",
-        lambda: registry.create("retriever", settings.retrieval.strategy, embedder, store, alias),
-    )
     memory = part("memory", lambda: PostgresMemoryStore(pool))
     queue = part("queue", lambda: PostgresJobQueue(pool, settings.ingestion.worker.lock_timeout_s))
     prompts = part("prompts", lambda: PromptRegistry(settings.root_dir / "prompts"))
+    llms = {"answer": answer_llm, "cheap": cheap_llm}
+    retriever = part(
+        "retriever",
+        lambda: build_pipeline(settings, embedder, store, alias, llms, prompts),
+    )
+    rewriter = part(
+        "rewriter",
+        lambda: (
+            QueryRewriter(
+                settings.retrieval.query_rewrite,
+                llms[settings.retrieval.query_rewrite.model_role],
+                prompts,
+            )
+            if settings.retrieval.query_rewrite.enabled
+            else None
+        ),
+    )
+    gcfg = settings.guardrails.groundedness
+    judge = part(
+        "judge",
+        lambda: registry.create("groundedness_judge", gcfg.judge, gcfg, llms, prompts),
+    )
     guards = part(
         "guards",
-        lambda: GuardPipeline.from_config(
-            settings.guardrails, {"answer": answer_llm, "cheap": cheap_llm}, prompts
-        ),
+        lambda: GuardPipeline.from_config(settings.guardrails, llms, prompts),
     )
     memory_manager = part(
         "memory_manager",
@@ -136,7 +159,16 @@ def build(
     orchestrator = part(
         "orchestrator",
         lambda: SimpleOrchestrator(
-            settings, answer_llm, cheap_llm, retriever, memory, guards, prompts, memory_manager
+            settings,
+            answer_llm,
+            cheap_llm,
+            retriever,
+            memory,
+            guards,
+            prompts,
+            memory_manager,
+            rewriter,
+            judge,
         ),
     )
     pipeline = part(
@@ -161,4 +193,5 @@ def build(
         orchestrator=orchestrator,
         pipeline=pipeline,
         memory_manager=memory_manager,
+        extras={"rewriter": rewriter, "judge": judge},
     )

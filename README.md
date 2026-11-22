@@ -25,7 +25,9 @@ tests/       unit, integration (Postgres), e2e   docker/  Dockerfile + Compose  
 | Vector store | Postgres + pgvector 0.8 (HNSW, iterative scan for filters) | `vector_store.*` |
 | Ingestion | Files (Markdown, text, HTML, PDF, DOCX) and inline documents via API; Postgres job queue | `ingestion.*` |
 | Chunking | Structure-aware recursive, 512 tokens, 64 overlap | `ingestion.chunker.*` |
-| Retrieval | Dense, `top_k: 8`, `min_score` + `min_hits` | `retrieval.*` |
+| Retrieval | Dense, `top_k: 8`; BM25, hybrid (RRF), HyDE, query rewriting and rerank (Cohere or local cross-encoder) one setting away | `retrieval.*` |
+| Thresholds | `min_score` + `min_hits`, calibrated per index and pipeline on the golden set | `chatbot calibrate` |
+| Evals | Golden set: hit@k, MRR, answer rate, faithfulness, abstention; CI gate with baseline | `chatbot eval`, `evals/gate.yaml` |
 | Weak retrieval | Clarifying question, never an invented answer | `answer.on_weak_retrieval` |
 | Streaming | `draft_then_final` (deltas, then one terminal event) | `answer.stream_mode: buffered` |
 | Safety | Injection checks (normalised heuristics; optional model classifier), PII redaction (regex; optional Presidio), prompt-leak check, all on the final text too | `guardrails.*` |
@@ -33,8 +35,7 @@ tests/       unit, integration (Postgres), e2e   docker/  Dockerfile + Compose  
 | Auth | API keys (hashed), JWT/OIDC bearer tokens, or both | `auth.mode` |
 | Observability | JSON logs with a trace ID per request; token counts (and cost, if prices are set) in every response | `observability.*` |
 
-Later milestones add BM25/hybrid/HyDE/rerank and the eval gate (M3), Ollama, Qdrant and
-re-index with alias flip (M4), and OpenTelemetry, Langfuse, LangGraph and Kubernetes (M5). See [docs/roadmap.md](docs/roadmap.md).
+Later milestones add Ollama, Qdrant and re-index with alias flip (M4), and OpenTelemetry, Langfuse, LangGraph and Kubernetes (M5). See [docs/roadmap.md](docs/roadmap.md).
 
 ## Quickstart (Docker)
 
@@ -100,7 +101,7 @@ Endpoints and the SSE event contract: [docs/api.md](docs/api.md).
 ## Tests
 
 ```bash
-make test-unit       # ~130 fast tests, no database
+make test-unit       # ~160 fast tests, no database
 make test-db         # integration + end-to-end against Postgres (TEST_DATABASE_URL)
 make lint
 ```
@@ -108,6 +109,19 @@ make lint
 The e2e suite runs the real path (API, Postgres job, worker, pgvector, chat) with the offline
 profile. `tests/e2e/test_live_openai.py` runs against OpenAI when `OPENAI_API_KEY` and
 `RUN_LIVE_TESTS=1` are set. CI runs lint and all non-live tests against a pgvector service.
+
+## Evals and calibration
+
+```bash
+make calibrate-apply   # sweep min_score + min_hits on the golden set, store them with the index
+make eval              # score retrieval and answers, check evals/gate.yaml
+make eval-retrieval    # retrieval metrics only, no LLM calls
+```
+
+Run both after ingesting, and again whenever you change the embedder, retrieval strategy,
+HyDE or reranker. CI does this with the offline profile on every pull request and fails below
+the floors in `evals/gate.yaml` or on a drop from `evals/baselines/offline.json`. See
+[evals/README.md](evals/README.md).
 
 ## Docs
 

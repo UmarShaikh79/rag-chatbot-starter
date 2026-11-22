@@ -1,0 +1,52 @@
+name: evals-live
+
+# Nightly eval with the hosted models (ADR 022). Skips itself when the repository has no
+# OPENAI_API_KEY secret. It reports only; add --gate to the eval step once you have tuned
+# the dev floors in evals/gate.yaml and committed evals/baselines/dev.json.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg17
+        env:
+          POSTGRES_USER: chatbot
+          POSTGRES_PASSWORD: chatbot
+          POSTGRES_DB: chatbot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U chatbot -d chatbot"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      DATABASE_URL: postgresql://chatbot:chatbot@localhost:5432/chatbot
+      CHATBOT_PROFILE: dev
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Skip without a key
+        if: env.OPENAI_API_KEY == ''
+        run: echo "No OPENAI_API_KEY secret; nothing to do."
+      - uses: actions/checkout@v4
+        if: env.OPENAI_API_KEY != ''
+      - uses: astral-sh/setup-uv@v6
+        if: env.OPENAI_API_KEY != ''
+        with:
+          python-version: "3.12"
+      - if: env.OPENAI_API_KEY != ''
+        run: |
+          uv sync --frozen
+          uv run chatbot migrate
+          uv run chatbot ingest --inline
+          uv run chatbot calibrate --apply
+          uv run chatbot eval --out eval-report.json
+      - uses: actions/upload-artifact@v4
+        if: always() && env.OPENAI_API_KEY != ''
+        with:
+          name: eval-report-live
+          path: eval-report.json
+          if-no-files-found: ignore

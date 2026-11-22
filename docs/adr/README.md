@@ -11,8 +11,8 @@
 | [007](007-safety-on-by-default.md) | Safety on by default | Accepted |
 | [008](008-memory-keyed-by-caller-user-id.md) | Memory keyed by caller user ID | Accepted |
 | [009](009-hosted-and-local-defaults.md) | Hosted and local defaults | Accepted |
-| [010](010-evals-as-a-ci-gate.md) | Evals as a CI gate | Accepted (milestone 3) |
-| [011](011-retrieval-thresholds-are-calibrated-never-constants.md) | Retrieval thresholds are calibrated, never constants | Accepted |
+| [010](010-evals-as-a-ci-gate.md) | Evals as a CI gate | Accepted (implemented in milestone 3, ADR 022) |
+| [011](011-retrieval-thresholds-are-calibrated-never-constants.md) | Retrieval thresholds are calibrated, never constants | Accepted (refined by ADR 021) |
 | [012](012-filtered-vector-search-on-pgvector.md) | Filtered vector search on pgvector | Accepted |
 | [013](013-re-ingesting-a-document-is-an-atomic-replace.md) | Re-ingesting a document is an atomic replace | Accepted |
 | [014](014-streaming-with-output-guards.md) | Streaming with output guards | Accepted |
@@ -20,3 +20,7 @@
 | [016](016-rolling-summaries-and-long-term-facts.md) | Rolling summaries and long-term facts | Accepted (milestone 2) |
 | [017](017-jwt-oidc-alongside-api-keys.md) | JWT/OIDC alongside API keys | Accepted (milestone 2) |
 | [018](018-layered-pii-and-injection-detectors.md) | Layered PII and injection detectors | Accepted (milestone 2) |
+| [019](019-hybrid-retrieval-with-rank-fusion-and-a-gate-score.md) | Hybrid retrieval with rank fusion and a gate score | Accepted (milestone 3) |
+| [020](020-bm25-in-postgres.md) | BM25 in Postgres, no extension | Accepted (milestone 3) |
+| [021](021-calibration-per-index-and-scorer.md) | Calibration per index and scorer | Accepted (milestone 3) |
+| [022](022-eval-runner-and-regression-gate.md) | Eval runner and regression gate | Accepted (milestone 3) |

@@ -35,3 +35,21 @@ embeddings:
     provider: hashing
     model: hashing-v1
     dims: 384
+
+# Rerankers (retrieval.rerank.model). Scores are on each model's own scale, so enabling one
+# or switching model needs `chatbot calibrate` (ADR 011).
+rerankers:
+  # Hosted. IDs read from https://docs.cohere.com/v2/docs/rerank on 2026-11-22
+  # (rerank-v5.0-pro is the stronger, slower sibling). Check that page when you clone.
+  cohere:rerank:
+    provider: cohere
+    model: rerank-v5.0-fast
+    api_key_env: COHERE_API_KEY
+  # Local cross-encoder; `uv sync --extra rerank`, downloads the model on first use.
+  local:bge-reranker-base:
+    provider: cross_encoder
+    model: BAAI/bge-reranker-base
+  # Word overlap. For tests and the offline profile only.
+  lexical:overlap:
+    provider: lexical
+    model: lexical-v1

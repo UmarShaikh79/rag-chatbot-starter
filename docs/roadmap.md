@@ -8,18 +8,20 @@ Ingest sample documents, ask, get a cited answer or a clarifying question. OpenA
 dense retrieval, API keys, Docker Compose, Postgres job queue, heuristic PII and injection
 guards, streaming contract, per-user deletion, unit/integration/e2e tests and CI.
 
-## M2: safety and memory (this release)
+## M2: safety and memory (done)
 
 Detector chains for PII (regex, optional Presidio) and injection (hardened heuristics, optional
 model classifier); prompt-leak check on the final text in every stream mode; rolling
 conversation summaries and long-term user facts, both redacted before storage and covered by
 `forget_user`; JWT/OIDC auth alongside API keys.
 
-## M3: retrieval quality and evals
+## M3: retrieval quality and evals (this release)
 
-BM25, hybrid (reciprocal rank fusion), HyDE, rerank (cross-encoder or Cohere); eval runner with
-hit rate, faithfulness and abstention metrics; CI gate with cached responses on PRs and live
-runs nightly; `make calibrate` to store `min_score` and `min_hits` per index; groundedness check.
+BM25 in Postgres, hybrid retrieval with reciprocal rank fusion, HyDE, query rewriting for
+follow-ups, rerank (Cohere, local cross-encoder); a gate score so thresholds survive fusion;
+`chatbot calibrate` storing `min_score` + `min_hits` per index and retrieval pipeline;
+`chatbot eval` with retrieval, answer, faithfulness and abstention metrics; an offline CI gate
+on every pull request and a nightly live run; optional groundedness check on answers.
 
 ## M4: local and alternative providers
 

@@ -196,3 +196,32 @@ def test_golden_retrieval_hit_rate(app_client):
 
     rate = sum(app_client.portal.call(hit, q) for q in answerable) / len(answerable)
     assert rate >= 0.9, f"hit@3 = {rate:.2f}"
+
+
+def test_calibrate_then_eval_with_hybrid_search(db, tmp_path: Path):
+    """Milestone 3 on Postgres: BM25 in SQL fused with dense, calibrated, then evaluated."""
+    from chatbot.evals.commands import calibrate, evaluate
+
+    docs = tmp_path / "docs"
+    shutil.copytree(ROOT / "samples" / "docs", docs)
+    settings = offline_settings(
+        ingestion={"sources": [{"name": "samples", "type": "files", "path": str(docs)}]},
+        retrieval={"strategy": "hybrid"},
+    )
+    comps = container.build(settings, db)
+    with TestClient(create_app(settings, components=comps)) as client:
+        client.components = comps
+        ingest(client)
+        assert client.get("/v1/sources").json()["index"]["calibrated"] is False
+
+        result, calibration = client.portal.call(lambda: calibrate(comps, apply=True))
+        assert calibration.scorer == "dense|hybrid(dense,bm25)"
+        assert result.met_target
+        index = client.get("/v1/sources").json()["index"]
+        assert index["calibrated"] is True and index["scorer"] == calibration.scorer
+        assert index["calibration"]["min_hits"] == calibration.min_hits
+
+        report = client.portal.call(lambda: evaluate(comps))
+        assert report.meta["calibrated"] is True
+        assert report.summary["retrieval.hit@3"] >= 0.95
+        assert report.summary["errors"] == 0

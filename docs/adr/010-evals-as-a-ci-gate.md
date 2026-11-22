@@ -1,6 +1,6 @@
 # ADR 010: Evals as a CI gate
 
-Status: Accepted (milestone 3)
+Status: Accepted; implemented in milestone 3 (ADR 022)
 
 ## Decision
 

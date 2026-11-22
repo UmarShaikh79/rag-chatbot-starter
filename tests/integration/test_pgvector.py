@@ -49,7 +49,7 @@ def chunks(doc_id: str, n: int, prefix: str = "", meta: dict | None = None) -> l
 async def test_index_records_model_and_refuses_mismatch(db):
     store = PgVectorStore(db, HnswSection())
     info = await store.ensure_index("docs", "model-a", DIMS, "v1")
-    assert info.name == "docs__model_a__16" and info.min_score is None
+    assert info.name == "docs__model_a__16" and info.text_config == "english"
     again = await store.ensure_index("docs", "model-a", DIMS, "v1")
     assert again.id == info.id
     with pytest.raises(IndexMismatchError):
@@ -180,3 +180,75 @@ async def test_delete_and_list(db):
     assert await store.list_document_ids(info, "s") == ["b"]
     hits = await store.search(info, unit_vec(rng), 10, {})
     assert {h.chunk.document_id for h in hits} == {"b"}
+
+
+async def test_keyword_search_scores_bm25_and_follows_replace(db):
+    """ADR 020: BM25 in SQL. Exact terms win, filters apply, re-ingest updates the index."""
+    rng = random.Random(7)
+    store = PgVectorStore(db, HnswSection())
+    info = await store.ensure_index("docs", "model-a", DIMS, "v1")
+    texts = {
+        "a": ["Error E309 means the device clock is wrong.", "Notes sync every minute."],
+        "b": ["Refunds take 5 to 10 business days.", "The clock icon shows history."],
+    }
+    for doc_id, parts in texts.items():
+        cs = [
+            Chunk(
+                id=f"{doc_id}-{i}",
+                document_id=doc_id,
+                position=i,
+                text=t,
+                metadata={"lang": "en"},
+                content_hash=str(i),
+            )
+            for i, t in enumerate(parts)
+        ]
+        await store.replace_document(info, doc(doc_id), cs, [unit_vec(rng) for _ in cs])
+
+    hits = await store.keyword_search(info, "what does error E309 mean", 5, {})
+    assert hits[0].chunk.id == "a-0" and hits[0].retriever == "bm25"
+    assert hits[0].scores["bm25"] == hits[0].score > 0
+    # "clock" appears in two chunks, "E309" in one: the rarer term carries more weight.
+    clock = await store.keyword_search(info, "clock", 5, {})
+    assert {h.chunk.id for h in clock} == {"a-0", "b-1"}
+    assert await store.keyword_search(info, "the of and", 5, {}) == []  # stopwords only
+    assert [
+        h.chunk.id for h in await store.keyword_search(info, "clock", 5, {"document_id": "b"})
+    ] == ["b-1"]
+
+    # After a re-ingest the old text is gone from keyword search too (ADR 013).
+    new = [
+        Chunk(
+            id="a-x",
+            document_id="a",
+            position=0,
+            text="Error E401 means expired.",
+            content_hash="x",
+        )
+    ]
+    await store.replace_document(info, doc("a", h="h2"), new, [unit_vec(rng)])
+    assert await store.keyword_search(info, "E309", 5, {}) == []
+    assert (await store.keyword_search(info, "E401", 5, {}))[0].chunk.id == "a-x"
+
+
+async def test_calibrations_are_stored_per_scorer(db):
+    from chatbot.core.types import Calibration
+
+    store = PgVectorStore(db, HnswSection())
+    info = await store.ensure_index("docs", "model-a", DIMS, "v1")
+    assert await store.get_calibration(info, "dense|dense") is None
+    await store.save_calibration(
+        info, Calibration(scorer="dense|dense", min_score=0.4, min_hits=2, metrics={"a": 1})
+    )
+    await store.save_calibration(
+        info, Calibration(scorer="rerank|rerank[m](dense)", min_score=0.2, min_hits=1)
+    )
+    dense = await store.get_calibration(info, "dense|dense")
+    assert dense.min_score == 0.4 and dense.min_hits == 2 and dense.metrics == {"a": 1}
+    assert dense.calibrated_at is not None
+    await store.save_calibration(info, Calibration(scorer="dense|dense", min_score=0.5, min_hits=1))
+    assert (await store.get_calibration(info, "dense|dense")).min_score == 0.5
+    assert [c.scorer for c in await store.list_calibrations(info)] == [
+        "dense|dense",
+        "rerank|rerank[m](dense)",
+    ]

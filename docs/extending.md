@@ -81,12 +81,36 @@ Also map the extension in `ingestion/sources/files.py` (`MEDIA_TYPES`).
 
 ```python
 @registry.register("retriever", "dense_mmr")
-def make(embedder, store, alias):
+def make(embedder, store, alias, **kwargs):  # kwargs: settings=...
     return MyRetriever(embedder, store, alias)  # needs .name, .retrieve() and .index()
 ```
 
-Set `retrieval.strategy: dense_mmr`. Return `(hits, usage)` with `score` on a stable scale and
-recalibrate `min_score` for it (ADR 011).
+Set `retrieval.strategy: dense_mmr`, or list it in `retrieval.hybrid.retrievers` to fuse it
+with others. Return `(hits, usage)`, put your score in `hit.scores["dense_mmr"]` as well as
+`hit.score`, and give the class a `signature` (it becomes part of the calibration key). Then
+run `chatbot calibrate --apply` (ADR 011, ADR 021). If your score should be the gate, set
+`retrieval.gate` (or extend the `Literal` in `RetrievalSection`).
+
+Keyword search lives on the store (`keyword_search`, ADR 020). To use ParadeDB `pg_search`,
+OpenSearch or another engine, subclass `PgVectorStore` and override that one method.
+
+## Add a reranker
+
+```python
+@registry.register("reranker", "voyage")
+def make(profile):  # a RerankerProfile from config/models.yaml
+    return MyReranker(profile)  # .signature and async .rerank(query, hits, top_n)
+```
+
+Use `chatbot.providers.rerankers.apply_scores(hits, scores, top_n)` to record the scores.
+Add an entry under `rerankers:` in `config/models.yaml` and point `retrieval.rerank.model` at it.
+
+## Add eval questions
+
+Append lines to `evals/datasets/golden.jsonl` (see `evals/README.md`). Include unanswerable
+questions that sound plausible for your domain: they are what calibration learns abstention
+from. Re-run `chatbot calibrate --apply`, then `chatbot eval --update-baseline` and commit the
+baseline with the questions.
 
 ## Add a PII or injection detector
 

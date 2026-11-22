@@ -27,7 +27,9 @@ them (`OPENAI_API_KEY`, `CHATBOT_API_KEYS`, `DATABASE_URL`).
 `models.answer`, `models.cheap` and `models.embed` name entries in `models.yaml`. Each LLM entry
 has `provider` (`openai`, `fake`), `model`, `api_key_env`, optional `base_url` (any
 OpenAI-compatible endpoint), `params` passed to the API, and `price_per_mtok` (`input`,
-`output`; leave `null` to omit cost). Embedding entries also have `dims`.
+`output`; leave `null` to omit cost). Embedding entries also have `dims`. Reranker entries
+(`rerankers:`) have `provider` (`cohere`, `cross_encoder`, `lexical`), `model`, `api_key_env`,
+`base_url` and `params`; the Cohere IDs were read from Cohere's rerank docs on 2026-11-22.
 
 The OpenAI model IDs were taken from OpenAI's models page on 2026-11-21. Check them when you
 clone; only `models.yaml` needs to change.
@@ -42,6 +44,7 @@ clone; only `models.yaml` needs to change.
 | `hnsw.iterative_scan` | `relaxed_order` | Keeps filtered queries from returning fewer than `top_k` rows (ADR 012). |
 | `hnsw.max_scan_tuples` | 20000 | Upper bound for iterative scans. |
 | `exact_scan_threshold` | 2000 | Filters matching at most this many chunks use an exact scan. |
+| `text_search_config` | `english` | Postgres text search config for BM25, recorded with each new index (ADR 020). |
 
 ### `ingestion`
 
@@ -59,15 +62,26 @@ any of these changes the chunker version, so the next sync re-chunks every docum
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `strategy` | `dense` | Registry name of the retriever. |
-| `top_k` | 8 | Chunks retrieved per question. |
-| `min_score` | 0.35 | Provisional (ADR 011). Strong hits score at least this. |
-| `min_hits` | 1 | Retrieval is weak when fewer than this many hits are strong. |
-| `thresholds_from` | `index` | Calibrated values stored on the index win; `config` forces these values. |
+| `strategy` | `dense` | `dense`, `bm25`, `hybrid`, or a retriever you register. |
+| `top_k` | 8 | Chunks retrieved per question (after fusion and rerank). |
+| `bm25.k1` / `bm25.b` | 1.2 / 0.75 | Okapi BM25 parameters (ADR 020). |
+| `hybrid.retrievers` | `[dense, bm25]` | Fused with reciprocal rank fusion (ADR 019). |
+| `hybrid.candidates` | 20 | Hits each retriever returns before fusion. |
+| `hybrid.rrf_k` / `hybrid.weights` | 60 / `{}` | RRF constant; per-retriever weights (default 1.0). |
+| `hyde.enabled` | false | Embed "question + hypothetical answer" from the cheap model (`hyde/v1`). |
+| `hyde.apply_to` | `[dense]` | Which retrievers get the hypothetical text. |
+| `query_rewrite.enabled` | false | Rewrite follow-ups into standalone queries (`rewrite_query/v1`). Only retrieval sees the rewrite. |
+| `query_rewrite.only_with_history` | true | Skip the call on a conversation's first message. |
+| `rerank.enabled` | false | Re-score `rerank.candidates` (20) hits with `rerank.model`. |
+| `rerank.model` | `cohere:rerank` | A name under `rerankers` in `config/models.yaml`: `cohere:rerank` (`COHERE_API_KEY`), `local:bge-reranker-base` (`uv sync --extra rerank`), `lexical:overlap` (tests). |
+| `gate` | `auto` | The score `min_score` applies to: `rerank` when reranking, else `dense`, else `bm25`. Never the fused RRF score. |
+| `min_score` / `min_hits` | 0.35 / 1 | Provisional, always applied together (ADR 011). |
+| `thresholds_from` | `index` | Calibrated values stored for this index and pipeline win; `config` forces these values. |
 
-The provisional 0.35 is a guess for `text-embedding-3-small`. Until the calibration command
-lands (milestone 3), check a few known-answerable and unanswerable questions after ingesting
-your own corpus and adjust. The API logs a warning once per index while it is uncalibrated.
+Calibrated thresholds are stored per index and **scorer** (the gate plus the pipeline, e.g.
+`dense|hybrid(dense,bm25)`; ADR 021). Change the strategy, HyDE or the reranker and the API
+logs that thresholds are provisional until you run `chatbot calibrate --apply` again.
+`GET /v1/sources` shows the active scorer and whether it is calibrated.
 
 ### `answer`
 
@@ -107,6 +121,13 @@ Summaries and facts reach the model through the `memory` variable of `answer/v2`
 consecutive words of the system prompt), and `stream_holdback_chars` (64): how far the streaming
 redactor stays behind the model so PII is never split across two events. Output checks run on
 the complete answer in both stream modes.
+
+Groundedness (off by default; one more model call per answer): `output.groundedness_check`
+judges the answer against the sources it cited. `groundedness.judge` is `llm`
+(`judge_groundedness/v1` on `model_role`, default cheap) or `lexical` (word overlap, offline);
+`min_score` (0.7) is the share of claims that must be supported; `on_fail` is `clarify`
+(default: ask instead), `refuse` or `warn` (adds `groundedness:low` to `warnings`); `on_error`
+is `allow` or `block` when the judge call fails. The same judge scores faithfulness in evals.
 
 Detectors (ADR 018):
 
@@ -176,6 +197,19 @@ export CHATBOT__AUTH__MODE=jwt CHATBOT__AUTH__JWT__ISSUER=http://localhost \
        CHATBOT__AUTH__JWT__HS256_SECRET_ENV=DEV_JWT_SECRET
 TOKEN=$(uv run chatbot dev-token --sub alice)
 ```
+
+### `evals`
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `dataset` | `evals/datasets/golden.jsonl` | One question per line; see `evals/README.md`. |
+| `gate` | `evals/gate.yaml` | Floors per profile, checked by `chatbot eval --gate`. |
+| `baselines_dir` | `evals/baselines` | `<profile>.json`, written by `--update-baseline`. |
+| `hit_at` | `[1, 3]` | Extra hit@k columns besides hit@top_k. |
+| `faithfulness_judge` | `llm` | `llm`, `lexical` (offline profile) or `off`. |
+| `calibration.target_answer_recall` | 0.9 | Share of answerable questions calibration must keep. |
+| `calibration.max_min_hits` | 3 | `min_hits` values tried. |
+| `calibration.min_unanswerable` | 5 | Warn when the dataset has fewer unanswerable questions. |
 
 ### `observability`
 

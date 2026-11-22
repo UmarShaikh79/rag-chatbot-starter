@@ -3,7 +3,9 @@
 It does not generate language. For answers it quotes the source sentence that shares the
 most words with the question and cites it; for clarifying questions it returns a fixed
 question. When no source sentence shares a word with the question it abstains, the way a
-real model is told to. Memory and guard prompts get rule-based replies: summaries list what
+real model is told to. HyDE gets the question back, query rewriting prefixes a short
+follow-up with the previous user message, and the groundedness judge uses word overlap.
+Memory and guard prompts get rule-based replies: summaries list what
 the user asked, fact extraction keeps "I am / I use / my ..." sentences, and the injection
 classifier uses the heuristic rules. It is not a relevance judge: use a real model to test
 abstention. That is enough to test the whole ingestion-to-answer path without network
@@ -58,6 +60,17 @@ class FakeLLM:
             return self._summarize(messages[-1].content)
         if purpose == "extract_facts":
             return self._extract_facts(messages[-1].content)
+        if purpose == "hyde":
+            found = _QUESTION.search(messages[-1].content)
+            return found.group(1) if found else ""
+        if purpose == "rewrite_query":
+            return self._rewrite(messages[-1].content)
+        if purpose == "judge_groundedness":
+            from chatbot.guardrails.groundedness import lexical_verdict
+
+            body = messages[-1].content
+            sources, _, answer = body.partition("\nAnswer:")
+            return lexical_verdict(answer, sources.removeprefix("Sources:")).model_dump_json()
         if purpose == "guard_injection":
             found = _CLASSIFY.search(messages[-1].content)
             hit = bool(detect_injection(found.group(1) if found else messages[-1].content))
@@ -80,6 +93,15 @@ class FakeLLM:
                 if best is None or (score, -order) > (best[0], best[1]):
                     best = (score, -order, f"{sentence[:400]} [{match.group(1)}]")
         return best[2] if best else "INSUFFICIENT_CONTEXT"
+
+    @staticmethod
+    def _rewrite(prompt: str) -> str:
+        """Prefix a short follow-up with the previous user message (a crude coreference)."""
+        latest = prompt.split("Latest message:", 1)[-1].strip()
+        earlier = _USER_LINE.findall(prompt.split("Latest message:", 1)[0])
+        if earlier and len(latest.split()) <= 6:
+            return f"{earlier[-1].strip()} {latest}"
+        return latest
 
     @staticmethod
     def _summarize(prompt: str) -> str:
