@@ -1,22 +1,71 @@
 class ChatbotError(Exception):
-    """Base error for the template."""
+    """Base error for the template.
+
+    ``permanent``: the same work would fail the same way if retried (a background job is then
+    marked failed at once instead of re-queued). None: decide from the HTTP status, if any.
+    """
+
+    permanent: bool | None = None
 
 
 class IndexMismatchError(ChatbotError):
     """The configured embedding model differs from the one the index was built with (ADR 005)."""
 
+    permanent = True
+
 
 class NotFoundError(ChatbotError):
-    pass
+    permanent = True
 
 
 class ForbiddenError(ChatbotError):
-    pass
+    permanent = True
 
 
 class ProviderError(ChatbotError):
     """A model, embedding or rerank provider failed after its own retries (down, rate-limited,
-    bad key, model missing). The API answers 502: the request was fine, the upstream was not."""
+    bad key, model missing). The API answers 502: the request was fine, the upstream was not.
+    ``status`` is the upstream's HTTP status, when there was one."""
+
+    def __init__(
+        self, message: str, status: int | None = None, permanent: bool | None = None
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status
+        if permanent is not None:
+            self.permanent = permanent
+
+
+# 4xx statuses that can succeed on a later attempt (timeout, conflict, too early, rate limit).
+RETRYABLE_4XX = frozenset({408, 409, 425, 429})
+
+
+def _status_of(exc: BaseException) -> int | None:
+    status = getattr(exc, "status_code", None)  # OpenAI SDK errors, ProviderError
+    if isinstance(status, int):
+        return status
+    response = getattr(exc, "response", None)  # httpx.HTTPStatusError
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def is_permanent(exc: BaseException) -> bool:
+    """True when retrying cannot help: bad credentials or permissions (401, 403), not found,
+    bad request, or one of our errors marked ``permanent``. Follows ``raise ... from`` causes,
+    so a source that wraps an HTTP error keeps its meaning. Unknown errors are not permanent."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        flag = getattr(current, "permanent", None)
+        if isinstance(flag, bool):
+            return flag
+        status = _status_of(current)
+        if status is not None:
+            return 400 <= status < 500 and status not in RETRYABLE_4XX
+        context = None if current.__suppress_context__ else current.__context__
+        current = current.__cause__ or context
+    return False
 
 
 def _sdk_provider_error(exc: BaseException) -> bool:

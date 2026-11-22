@@ -5,6 +5,15 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: background jobs retried errors that can't succeed. A key without access to the model
+  (403), a wrong key (401), a missing model or source (404) or a bad request was retried up to
+  `worker.max_attempts` times with backoff before failing. The worker now asks
+  `is_permanent(exc)` (`core/errors.py`: 4xx other than 408/409/425/429, from OpenAI, `httpx`,
+  Ollama or Cohere errors, following `raise ... from` causes; template errors marked
+  `permanent`) and fails such jobs on the first attempt. Rate limits, 5xx, timeouts and
+  connection errors are retried as before. `ProviderError` now carries the upstream
+  `status_code`. In a copy you have modified: a custom `JobQueue` needs the new
+  `retry: bool = True` parameter on `fail()`.
 - Fix: a non-streamed chat whose model or embedding provider failed (OpenAI down, a bad key,
   Ollama without the model) answered Starlette's plain-text `500 Internal Server Error`, with no
   `trace_id`, unlike every other error. Failures now answer JSON `{"detail", "trace_id"}` with

@@ -94,6 +94,11 @@ any of these changes the chunker version, so the next sync re-chunks every docum
 
 `worker`: `concurrency`, `max_attempts` (retries with exponential backoff), `poll_interval_s`,
 `lock_timeout_s` (a job locked longer than this is assumed abandoned and claimed again).
+Permanent errors are not retried: a 4xx from a provider or source other than 408, 409, 425 and
+429 (a key without access to the model is 403, a wrong key 401), or an error the template marks
+permanent (unknown source, index built with another embedding model). The job fails on its first
+attempt with `last_error` saying why; fix the cause and enqueue it again. Rate limits, 5xx,
+timeouts and connection errors are retried as before.
 
 ### `retrieval`
 
