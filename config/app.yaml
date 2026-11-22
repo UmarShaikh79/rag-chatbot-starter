@@ -155,6 +155,7 @@ guardrails:
     groundedness_check: false       # judge every answer against its sources (one more call)
   pii:
     detectors: [regex]              # regex | presidio (names, places; `uv sync --extra presidio`)
+    output_detectors: [regex]       # for answers (from your documents); null: same as detectors
     allow: []                       # strings never redacted, e.g. your public support email
     presidio:
       language: en

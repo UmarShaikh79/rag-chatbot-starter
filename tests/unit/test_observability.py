@@ -269,3 +269,65 @@ def test_langfuse_on_builds_an_exporter_without_the_sdk():
         assert tel.meter_provider is None  # Langfuse takes traces only
     finally:
         tel.shutdown()
+
+
+@pytest.fixture
+def global_otel(otel):
+    """The test providers registered as OpenTelemetry's global ones, as production does
+    (configure_telemetry skips that when given test exporters). FastAPI's own telemetry only
+    switches on with a global provider, so without this the bug below cannot show."""
+    import opentelemetry.metrics._internal as metrics_api
+    from opentelemetry import trace
+    from opentelemetry.util._once import Once
+
+    saved = (
+        trace._TRACER_PROVIDER,
+        trace._TRACER_PROVIDER_SET_ONCE,
+        metrics_api._METER_PROVIDER,
+        metrics_api._METER_PROVIDER_SET_ONCE,
+    )
+    tel = tracing.telemetry()
+    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
+    metrics_api._METER_PROVIDER, metrics_api._METER_PROVIDER_SET_ONCE = None, Once()
+    trace.set_tracer_provider(tel.tracer_provider)
+    metrics_api.set_meter_provider(tel.meter_provider)
+    yield otel
+    (
+        trace._TRACER_PROVIDER,
+        trace._TRACER_PROVIDER_SET_ONCE,
+        metrics_api._METER_PROVIDER,
+        metrics_api._METER_PROVIDER_SET_ONCE,
+    ) = saved
+
+
+def test_fastapi_telemetry_skips_probes_and_counts_requests_once(global_otel, fake_components):
+    """Regression: FastAPI 0.165+ traces and meters requests itself. It added an empty second
+    root trace per request, made every health check a trace, and counted every request twice
+    in http.server.request.duration."""
+    from opentelemetry.trace import SpanKind
+
+    exporter, reader = global_otel.exporter, global_otel.reader
+    app = create_app(fake_components.settings, components=fake_components)
+    with TestClient(app) as client:
+        exporter.clear()
+        for probe in ("/healthz", "/livez", "/readyz"):
+            assert client.get(probe).status_code == 200
+        assert exporter.get_finished_spans() == ()
+        assert client.post("/v1/chat", json={"message": QUESTION}).status_code == 200
+
+    spans = exporter.get_finished_spans()
+    servers = [s for s in spans if s.kind == SpanKind.SERVER]
+    assert [s.name for s in servers] == ["POST /v1/chat"]  # one server span: the template's
+    assert {s.context.trace_id for s in spans} == {servers[0].context.trace_id}  # one trace
+    assert not any(s.instrumentation_scope.name == "fastapi" for s in spans)
+
+    scopes, routes = set(), set()
+    data = reader.get_metrics_data()
+    for rm in data.resource_metrics if data else []:
+        for sm in rm.scope_metrics:
+            for m in sm.metrics:
+                if m.name == "http.server.request.duration":
+                    scopes.add(sm.scope.name)
+                    routes |= {p.attributes.get("http.route") for p in m.data.data_points}
+    assert scopes == {"chatbot"}  # recorded once, by TraceMiddleware
+    assert routes == {"/v1/chat"}  # probes are not metered

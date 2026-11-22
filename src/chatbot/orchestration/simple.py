@@ -140,7 +140,7 @@ class SimpleOrchestrator:
     ) -> None:
         if self.settings.memory.redact_before_persist:
             question, _ = self.guards.redactor.redact(question)
-            answer, _ = self.guards.redactor.redact(answer)
+            answer, _ = self.guards.output_redactor.redact(answer)  # as the user saw it
         await self.memory.save_turns(
             ctx,
             [
@@ -180,7 +180,7 @@ class SimpleOrchestrator:
             yield "done", completion.text, completion.usage
             return
         redactor = StreamRedactor(
-            self.settings.guardrails.stream_holdback_chars, self.guards.redactor
+            self.settings.guardrails.stream_holdback_chars, self.guards.output_redactor
         )
         full, usage, holding = "", None, bool(hold_prefix)
         async for delta in llm.stream(messages, purpose=purpose):

@@ -349,6 +349,10 @@ class PiiSection(Strict):
     # Detectors run together and their spans are merged. regex: built in, no downloads.
     # presidio: names and addresses too (install the `presidio` extra and a spaCy model).
     detectors: list[str] = Field(["regex"], min_length=1)
+    # Detectors for answers (output guard, streamed drafts, stored answers). Answers are built
+    # from your own documents, where names, places and button labels are content: NER models
+    # such as presidio mislabel them ("Request refund" -> "[PERSON] refund"). null: detectors.
+    output_detectors: list[str] | None = Field(["regex"], min_length=1)
     allow: list[str] = []  # exact strings never redacted, e.g. your public support address
     presidio: PresidioOptions = PresidioOptions()
 

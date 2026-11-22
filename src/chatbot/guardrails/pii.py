@@ -126,9 +126,29 @@ class Redactor:
         return "".join(parts), sorted({span.label for span in spans})
 
     @classmethod
-    def from_config(cls, cfg: GuardrailsSection) -> Redactor:
-        detectors = [registry.create("pii_detector", name, cfg) for name in cfg.pii.detectors]
+    def from_config(cls, cfg: GuardrailsSection, names: Sequence[str] | None = None) -> Redactor:
+        names = cfg.pii.detectors if names is None else names
+        detectors = [registry.create("pii_detector", name, cfg) for name in names]
         return cls(detectors, cfg.pii.allow)
+
+    @classmethod
+    def pair_from_config(cls, cfg: GuardrailsSection) -> tuple[Redactor, Redactor]:
+        """(input, output) redactors. Input: the user's messages and what is stored from them.
+        Output: answers (``pii.output_detectors``; null means the same detectors). A detector
+        used by both is built once, so a spaCy model loads once."""
+        made: dict[str, PiiDetector] = {}
+
+        def build(names: Sequence[str]) -> Redactor:
+            for name in names:
+                if name not in made:
+                    made[name] = registry.create("pii_detector", name, cfg)
+            return cls([made[n] for n in names], cfg.pii.allow)
+
+        input_redactor = build(cfg.pii.detectors)
+        out = cfg.pii.output_detectors
+        if out is None or list(out) == list(cfg.pii.detectors):
+            return input_redactor, input_redactor
+        return input_redactor, build(out)
 
 
 _DEFAULT = Redactor()

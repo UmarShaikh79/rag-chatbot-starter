@@ -5,6 +5,20 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: with OpenTelemetry on, FastAPI 0.165+ added its own request telemetry next to the
+  template's. Every request became two traces (the second an empty root), was counted twice in
+  `http.server.request.duration`, and every health check became a trace (22 in 10 minutes from
+  the Compose healthcheck alone). The app now turns FastAPI's request spans and metrics off and
+  skips probes (`api/app.py`, `_fastapi_telemetry`; older FastAPI has nothing to turn off).
+  In a copy you have modified: take `_fastapi_telemetry` and its use in `create_app`.
+- Fix: Presidio redacted answers built from your own documents ("Tidepool Notes is..." became
+  "[PERSON] is...", "choose Request refund" became "choose [PERSON] refund"). New setting
+  `guardrails.pii.output_detectors` (default `[regex]`) is used for answers: the output guard,
+  the streamed drafts and the stored answer, which now always agree. `guardrails.pii.detectors`
+  still covers user messages, stored questions, summaries and facts. Nothing changes unless you
+  had turned Presidio on; `output_detectors: null` restores one redactor for both.
+  `docs/configuration.md` now says what Presidio catches and misses, its cost, and how to pass
+  the spaCy model to a Compose build.
 - Fix: questions with `filters` were judged weak against a `min_hits` calibrated on the whole
   corpus. A filter to one document (one customer, one product) rarely has two strong chunks,
   so with a calibrated `min_hits` of 2 such questions always got a clarifying question, even

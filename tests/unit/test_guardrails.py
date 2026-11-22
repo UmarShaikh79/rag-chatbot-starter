@@ -322,3 +322,77 @@ async def test_prompt_leak_guard_ignores_values_filled_into_the_prompt():
     leak = "Ask ONE short clarifying question that would help find the right information."
     blocked = await guard.check(GuardPayload(text=leak, metadata=meta))
     assert blocked.action == "block" and blocked.reasons == ["prompt_leak"]
+
+
+class WordNer:
+    """Stands in for an NER detector such as presidio: labels chosen words PERSON."""
+
+    name = "word_ner"
+
+    def __init__(self, words: set[str]) -> None:
+        self.words = {w.lower() for w in words}
+
+    def find(self, text: str):
+        import re
+
+        from chatbot.core.types import PiiSpan
+
+        return [
+            PiiSpan(start=m.start(), end=m.end(), label="PERSON", score=0.85)
+            for m in re.finditer(r"[A-Za-z]+", text)
+            if m.group().lower() in self.words
+        ]
+
+
+def _register_word_ner(words: set[str]):
+    from chatbot.core.registry import registry
+
+    made = []
+
+    def factory(cfg):
+        made.append(WordNer(words))
+        return made[-1]
+
+    registry.add("pii_detector", "word_ner", factory)
+    return made
+
+
+def test_output_detectors_default_to_regex_and_share_instances():
+    from chatbot.core.settings import GuardrailsSection
+    from chatbot.guardrails.pii import Redactor
+
+    made = _register_word_ner({"maria"})
+    cfg = GuardrailsSection(pii={"detectors": ["regex", "word_ner"]})
+    inp, out = Redactor.pair_from_config(cfg)
+    assert [d.name for d in inp.detectors] == ["regex", "word_ner"]
+    assert [d.name for d in out.detectors] == ["regex"]  # NER kept off answers by default
+    assert len(made) == 1  # built once
+    same = GuardrailsSection(pii={"detectors": ["regex", "word_ner"], "output_detectors": None})
+    a, b = Redactor.pair_from_config(same)
+    assert a is b  # null: answers use the same detectors, as before
+
+
+async def test_ner_redacts_the_question_but_not_the_answer():
+    """Regression: with presidio on, answers from the operator's own documents were
+    redacted ("Tidepool Notes is..." -> "[PERSON] is..."). NER now runs on the user's text
+    only; the streamed drafts, final answer and stored answer agree."""
+    from chatbot.core.types import ChatRequest
+    from tests.unit.test_orchestrator import build, events
+
+    _register_word_ner({"maria", "renewal"})  # "renewal" is in the sample refund answer
+    q = "I'm Maria. How long is the refund window for annual plans?"
+    c = await build(guardrails={"pii": {"detectors": ["regex", "word_ner"]}})
+    evs = await events(c, q, user_id="u-ner")
+    final = evs[-1]
+    assert final.event == "final", final.event  # drafts == final: no replace event
+    assert "renewal" in final.data["answer"] and "[PERSON]" not in final.data["answer"]
+    assert "pii:PERSON" in final.data["warnings"]  # found in the question
+    stored = [t.content for _, _, t in c.memory.turns]
+    assert any("[PERSON]" in t and "Maria" not in t for t in stored)  # question redacted
+    assert any("renewal" in t for t in stored)  # answer stored as the user saw it
+
+    old = await build(
+        guardrails={"pii": {"detectors": ["regex", "word_ner"], "output_detectors": None}}
+    )
+    resp = await old.orchestrator.run(ChatRequest(message=q))
+    assert "[PERSON]" in resp.answer and "renewal" not in resp.answer  # the old behaviour

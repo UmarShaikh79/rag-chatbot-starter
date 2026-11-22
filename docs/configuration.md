@@ -173,6 +173,7 @@ Detectors (ADR 018):
 | Key | Default | Notes |
 | --- | --- | --- |
 | `pii.detectors` | `[regex]` | `regex`: emails, phones, cards (Luhn), IBANs, US SSNs, IPv4. `presidio`: adds names, places and more. Spans from all detectors are merged. |
+| `pii.output_detectors` | `[regex]` | Detectors for answers (output guard, streamed drafts, stored answers). `null` uses `pii.detectors`. Answers come from your documents, where NER mislabels content (see below). |
 | `pii.allow` | `[]` | Exact strings never redacted, e.g. your public support address. |
 | `pii.presidio.*` | `en`, `en_core_web_sm`, 0.5 | `language`, `spacy_model`, `entities`, `score_threshold`. |
 | `injection.detectors` | `[heuristic]` | `heuristic`: rules on normalised text (zero-width, leetspeak, spaced letters, base64 decoded). `llm`: a classifier prompt on a model. |
@@ -189,9 +190,22 @@ CHATBOT__GUARDRAILS__PII__DETECTORS='[regex, presidio]' uv run chatbot serve
 ```
 
 In Docker, build with `--build-arg UV_EXTRAS="--extra presidio"` and
-`--build-arg SPACY_MODEL_URL=<model wheel URL from github.com/explosion/spacy-models>`.
-Presidio also redacts names in answers quoted from your documents; add names that are fine to
-show (your product, your staff) to `pii.allow`.
+`--build-arg SPACY_MODEL_URL=<model wheel URL from github.com/explosion/spacy-models>`. Compose
+passes only `UV_EXTRAS`, so give the model to the build yourself:
+
+```bash
+UV_EXTRAS="--extra presidio" docker compose -f docker/compose.yaml --env-file .env build \
+  --build-arg SPACY_MODEL_URL=https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+```
+
+What to expect (measured with `en_core_web_sm` on the sample corpus): about 13 ms and 40 MB
+more per process, and an image of 1.6 GB instead of 0.6 GB. It catches names and places in
+messages. It misses street addresses ("221B Baker Street"). The small model scores every match
+0.85, so `score_threshold` cannot separate real names from false ones, and it labels product
+names and UI words as people: "Tidepool Notes", "Request refund", integration names in
+questions. That is why answers use regex only by default (`pii.output_detectors`). On the input
+side, add your product, integration and staff names to `pii.allow`, or a question about them
+loses that word before retrieval. `en_core_web_lg` (~400 MB) is more accurate.
 
 ### `auth`
 
