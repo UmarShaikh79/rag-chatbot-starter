@@ -104,8 +104,28 @@ class HnswSection(Strict):
     max_scan_tuples: int = 20000
 
 
+class QdrantHnsw(Strict):
+    m: int = Field(16, ge=4)
+    ef_construct: int = Field(100, ge=4)
+
+
+class QdrantSection(Strict):
+    """Qdrant as the vector store (ADR 024). Postgres still keeps the index catalog."""
+
+    url_env: str = "QDRANT_URL"  # e.g. http://localhost:6333 ; unset -> url below
+    url: str = "http://localhost:6333"
+    api_key_env: str | None = "QDRANT_API_KEY"  # Qdrant Cloud; ignored when the var is unset
+    location: str | None = None  # ":memory:" runs Qdrant's in-process local mode (tests)
+    prefer_grpc: bool = False
+    timeout_s: int = Field(30, ge=1)
+    hnsw: QdrantHnsw = QdrantHnsw()
+    hnsw_ef: int = Field(128, ge=1)  # search-time beam width, like pgvector's ef_search
+    on_disk: bool = False  # keep vectors on disk (memmap) instead of RAM
+    upsert_batch: int = Field(256, ge=1)
+
+
 class VectorStoreSection(Strict):
-    backend: str = "pgvector"
+    backend: str = "pgvector"  # pgvector | qdrant | any store you register
     index: str = Field("docs", pattern=r"^[a-z][a-z0-9_]{0,40}$")
     distance: Literal["cosine"] = "cosine"
     hnsw: HnswSection = HnswSection()
@@ -113,6 +133,7 @@ class VectorStoreSection(Strict):
     # Postgres text search config for BM25 (english, simple, german, ...). Recorded with an
     # index when it is created; changing it needs a new index (re-ingest), like the embedder.
     text_search_config: str = Field("english", pattern=r"^[a-z_]{1,40}$")
+    qdrant: QdrantSection = QdrantSection()
 
 
 class SourceConfig(Strict):
@@ -394,6 +415,7 @@ class EmbeddingProfile(Strict):
     dims: int
     api_key_env: str | None = None
     base_url: str | None = None
+    params: dict[str, Any] = {}  # provider options, e.g. Ollama's query/document prefixes
     price_per_mtok: dict[str, float | None] = {}
 
 

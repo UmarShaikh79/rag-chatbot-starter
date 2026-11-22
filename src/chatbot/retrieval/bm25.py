@@ -75,7 +75,8 @@ class Bm25Retriever:
         if not isinstance(store, KeywordSearch):
             raise ChatbotError(
                 f"retrieval uses bm25 but the vector store {type(store).__name__} has no "
-                "keyword_search; use the pgvector store or add keyword_search to yours"
+                "keyword_search; use the pgvector store, set retrieval.strategy: dense, or "
+                "add keyword_search to your store (ADR 024)"
             )
         self.embedder = embedder
         self.store = store

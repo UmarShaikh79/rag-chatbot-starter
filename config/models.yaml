@@ -18,6 +18,24 @@ llm:
     api_key_env: OPENAI_API_KEY
     params: {}
     price_per_mtok: {input: null, output: null}
+  # Local models through Ollama (config/profiles/local-ollama.yaml). Pull them first:
+  #   ollama pull qwen3.5:9b && ollama pull gemma3:4b && ollama pull nomic-embed-text
+  # Tags read from https://ollama.com/library and a Sept 2026 ranking
+  # (https://www.morphllm.com/best-ollama-models) on 2026-11-22; pick what fits your
+  # hardware. qwen3.5:9b needs ~7 GB of memory, gemma3:4b ~3.5 GB.
+  ollama:answer:
+    provider: ollama
+    model: qwen3.5:9b
+    params:
+      think: false                  # a thinking model: skip the reasoning phase for RAG answers
+      keep_alive: 10m
+      options: {temperature: 0.2, num_ctx: 8192}   # six 512-token chunks need > 4096
+  ollama:cheap:
+    provider: ollama
+    model: gemma3:4b
+    params:
+      keep_alive: 10m
+      options: {temperature: 0.0, num_ctx: 4096}
   # Deterministic, offline model used by tests and the `offline` profile. Not an LLM.
   fake:extractive:
     provider: fake
@@ -30,6 +48,17 @@ embeddings:
     dims: 1536
     api_key_env: OPENAI_API_KEY
     price_per_mtok: {input: null}
+  # Local embeddings through Ollama. 768 dims, so never interchangeable with the 1536-dim
+  # OpenAI index (ADR 005); switching between them is a re-index (ADR 023). The prefixes
+  # are what nomic-embed-text was trained with; other models want their own or none.
+  ollama:nomic-embed-text:
+    provider: ollama
+    model: nomic-embed-text
+    dims: 768
+    params:
+      document_prefix: "search_document: "
+      query_prefix: "search_query: "
+      keep_alive: 10m
   # Offline bag-of-words embedder for tests and demos without an API key. Lexical only.
   hashing:384:
     provider: hashing

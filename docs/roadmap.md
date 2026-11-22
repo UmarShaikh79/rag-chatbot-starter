@@ -15,7 +15,7 @@ model classifier); prompt-leak check on the final text in every stream mode; rol
 conversation summaries and long-term user facts, both redacted before storage and covered by
 `forget_user`; JWT/OIDC auth alongside API keys.
 
-## M3: retrieval quality and evals (this release)
+## M3: retrieval quality and evals (done)
 
 BM25 in Postgres, hybrid retrieval with reciprocal rank fusion, HyDE, query rewriting for
 follow-ups, rerank (Cohere, local cross-encoder); a gate score so thresholds survive fusion;
@@ -23,11 +23,13 @@ follow-ups, rerank (Cohere, local cross-encoder); a gate score so thresholds sur
 `chatbot eval` with retrieval, answer, faithfulness and abstention metrics; an offline CI gate
 on every pull request and a nightly live run; optional groundedness check on answers.
 
-## M4: local and alternative providers
+## M4: local and alternative providers (this release)
 
-Ollama LLM and `nomic-embed-text` embeddings; Qdrant store; re-index into a new physical index
-and flip the alias; SQL record source; pgvector operations guide (filtered search tuning,
-autovacuum, `REINDEX INDEX CONCURRENTLY`).
+Ollama chat and `nomic-embed-text` embeddings (`local-ollama` profile); Qdrant as a second
+vector store with Postgres keeping the index catalog; `chatbot reindex` builds a new physical
+index beside the live one, `chatbot index activate` flips the alias and `rollback` flips it
+back; SQL record source; pgvector operations guide (filtered search tuning, autovacuum,
+`REINDEX INDEX CONCURRENTLY`); Compose profiles for Ollama and Qdrant.
 
 ## M5: production extras
 

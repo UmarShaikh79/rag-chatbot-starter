@@ -6,7 +6,7 @@
 | [002](002-python-tooling.md) | Python tooling | Accepted |
 | [003](003-plain-python-orchestration.md) | Plain Python orchestration | Accepted |
 | [004](004-postgres-for-everything-first.md) | Postgres for everything first | Accepted |
-| [005](005-the-embedding-model-is-part-of-the-index.md) | The embedding model is part of the index | Accepted |
+| [005](005-the-embedding-model-is-part-of-the-index.md) | The embedding model is part of the index | Accepted (re-index: ADR 023) |
 | [006](006-weak-retrieval-asks-never-invents.md) | Weak retrieval asks, never invents | Accepted |
 | [007](007-safety-on-by-default.md) | Safety on by default | Accepted |
 | [008](008-memory-keyed-by-caller-user-id.md) | Memory keyed by caller user ID | Accepted |
@@ -24,3 +24,6 @@
 | [020](020-bm25-in-postgres.md) | BM25 in Postgres, no extension | Accepted (milestone 3) |
 | [021](021-calibration-per-index-and-scorer.md) | Calibration per index and scorer | Accepted (milestone 3) |
 | [022](022-eval-runner-and-regression-gate.md) | Eval runner and regression gate | Accepted (milestone 3) |
+| [023](023-reindex-beside-the-live-index-then-switch.md) | Re-index beside the live index, then switch | Accepted (milestone 4) |
+| [024](024-qdrant-behind-the-store-interface-with-a-postgres-catalog.md) | Qdrant behind the store interface, with a Postgres catalog | Accepted (milestone 4) |
+| [025](025-local-models-through-ollamas-native-api.md) | Local models through Ollama's native API | Accepted (milestone 4) |

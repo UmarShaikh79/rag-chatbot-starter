@@ -145,3 +145,6 @@ Show these to the user if you like; `DELETE /v1/users/{user_id}/memory/facts/7` 
  "deleted": {"user_facts": 3, "conversation_summaries": 1, "turns": 24, "conversations": 2,
              "jobs": 0, "documents": 0}}
 ```
+
+With Qdrant as the store, the user's vectors are deleted from it first and counted as
+`vector_points`.

@@ -15,32 +15,36 @@ Keyword search (ADR 020): every chunk also stores ``to_tsvector(text_config, tex
 length, and ``keyword_search`` scores Okapi BM25 in SQL with a GIN index for candidates. No
 extension needed. For tens of millions of chunks, swap in a dedicated engine (ParadeDB
 ``pg_search``, OpenSearch) behind the same ``keyword_search`` method.
+
+Index bookkeeping (aliases, documents, calibrations, re-index and rollback) is shared with
+the other stores in ``chatbot.stores.catalog``. Operating it at scale (autovacuum, HNSW
+rebuilds after churn, memory) is covered in docs/operations/pgvector.md.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from chatbot.core.errors import IndexMismatchError
 from chatbot.core.registry import registry
 from chatbot.core.settings import Bm25Options, HnswSection, Settings
-from chatbot.core.types import Calibration, Chunk, IndexInfo, ParsedDocument, ScoredChunk
+from chatbot.core.types import Chunk, IndexInfo, ParsedDocument, ScoredChunk
 from chatbot.db import vector_literal
+from chatbot.stores.catalog import CatalogStore, physical_name
 
 log = logging.getLogger(__name__)
 
-
-def physical_name(alias: str, model: str, dims: int) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
-    return f"{alias}__{slug}__{dims}"
+__all__ = ["PgVectorStore", "physical_name"]
 
 
-class PgVectorStore:
+class PgVectorStore(CatalogStore):
+    backend = "pgvector"
+
     def __init__(
         self,
         pool: AsyncConnectionPool,
@@ -49,86 +53,30 @@ class PgVectorStore:
         text_config: str = "english",
         bm25: Bm25Options | None = None,
     ) -> None:
-        self.pool = pool
+        super().__init__(pool, text_config)
         self.hnsw = hnsw
         self.exact_scan_threshold = exact_scan_threshold
-        self.text_config = text_config  # for new indexes; existing ones keep their own
         self.bm25 = bm25 or Bm25Options()
 
     # ------------------------------------------------------------------ indexes
 
-    @staticmethod
-    def _info(row: dict[str, Any], alias: str) -> IndexInfo:
-        return IndexInfo(
-            id=row["id"],
-            name=row["name"],
-            alias=alias,
-            embedding_model=row["embedding_model"],
-            dims=row["dims"],
-            chunker_version=row["chunker_version"],
-            text_config=row.get("text_config") or "english",
+    async def _create_physical(self, info: IndexInfo, conn: AsyncConnection) -> None:
+        """A partial HNSW index over this index's rows. Built empty and filled as rows
+        arrive; for a large re-index, see docs/operations/pgvector.md."""
+        m, efc = int(self.hnsw.m), int(self.hnsw.ef_construction)
+        await conn.execute(
+            f"""CREATE INDEX IF NOT EXISTS chunks_hnsw_{int(info.id)} ON chunks
+                USING hnsw ((embedding::vector({int(info.dims)})) vector_cosine_ops)
+                WITH (m = {m}, ef_construction = {efc})
+                WHERE index_id = {int(info.id)}"""
         )
 
-    async def get_index(self, alias: str) -> IndexInfo | None:
-        async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                """SELECT v.* FROM index_aliases a JOIN vector_indexes v ON v.id = a.index_id
-                   WHERE a.alias = %s""",
-                (alias,),
-            )
-            row = await cur.fetchone()
-        return self._info(row, alias) if row else None
-
-    async def ensure_index(
-        self, alias: str, embedding_model: str, dims: int, chunker_version: str
-    ) -> IndexInfo:
-        current = await self.get_index(alias)
-        if current is not None:
-            if current.embedding_model != embedding_model or current.dims != dims:
-                raise IndexMismatchError(
-                    f"Index alias '{alias}' was built with {current.embedding_model} "
-                    f"({current.dims} dims) but the configured embedder is {embedding_model} "
-                    f"({dims} dims). Point vector_store.index at a new alias and re-ingest."
-                )
-            return current
-        name = physical_name(alias, embedding_model, dims)
-        async with self.pool.connection() as conn, conn.transaction():
-            # Serialise concurrent creators of the same alias.
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (alias,))
-            cur = await conn.execute(
-                """INSERT INTO vector_indexes (name, embedding_model, dims, chunker_version,
-                                              text_config)
-                   VALUES (%s, %s, %s, %s, %s)
-                   ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-                   RETURNING id""",
-                (name, embedding_model, dims, chunker_version, self.text_config),
-            )
-            index_id = (await cur.fetchone())["id"]
-            m, efc = int(self.hnsw.m), int(self.hnsw.ef_construction)
-            await conn.execute(
-                f"""CREATE INDEX IF NOT EXISTS chunks_hnsw_{index_id} ON chunks
-                    USING hnsw ((embedding::vector({int(dims)})) vector_cosine_ops)
-                    WITH (m = {m}, ef_construction = {efc})
-                    WHERE index_id = {int(index_id)}"""
-            )
-            await conn.execute(
-                """INSERT INTO index_aliases (alias, index_id) VALUES (%s, %s)
-                   ON CONFLICT (alias) DO NOTHING""",
-                (alias, index_id),
-            )
-        # Re-read through the alias: another process may have won the race.
-        return await self.ensure_index(alias, embedding_model, dims, chunker_version)
+    async def _drop_physical(self, info: IndexInfo, conn: AsyncConnection) -> None:
+        # Chunks go with their documents (ON DELETE CASCADE) when the catalog row is deleted.
+        await conn.execute(f"DROP INDEX IF EXISTS chunks_hnsw_{int(info.id)}")
+        await conn.execute("DELETE FROM documents WHERE index_id = %s", (info.id,))
 
     # ------------------------------------------------------------------ documents
-
-    async def document_state(self, index: IndexInfo, document_id: str) -> dict[str, Any] | None:
-        async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                """SELECT content_hash, chunker_version, embedding_model FROM documents
-                   WHERE index_id = %s AND id = %s""",
-                (index.id, document_id),
-            )
-            return await cur.fetchone()
 
     async def replace_document(
         self,
@@ -145,30 +93,7 @@ class PgVectorStore:
             if len(v) != index.dims:
                 raise IndexMismatchError(f"Vector has {len(v)} dims, index expects {index.dims}")
         async with self.pool.connection() as conn, conn.transaction():
-            await conn.execute(
-                """INSERT INTO documents (index_id, id, source, uri, title, content_hash,
-                                          chunker_version, embedding_model, user_id, metadata)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (index_id, id) DO UPDATE SET
-                     source = EXCLUDED.source, uri = EXCLUDED.uri, title = EXCLUDED.title,
-                     content_hash = EXCLUDED.content_hash,
-                     chunker_version = EXCLUDED.chunker_version,
-                     embedding_model = EXCLUDED.embedding_model,
-                     user_id = EXCLUDED.user_id, metadata = EXCLUDED.metadata,
-                     updated_at = now()""",
-                (
-                    index.id,
-                    document.id,
-                    document.source,
-                    document.uri,
-                    document.title,
-                    document.content_hash,
-                    index.chunker_version,
-                    index.embedding_model,
-                    user_id,
-                    json.dumps(document.metadata),
-                ),
-            )
+            await self._upsert_document(conn, index, document, user_id)
             await conn.execute(
                 "DELETE FROM chunks WHERE index_id = %s AND document_id = %s",
                 (index.id, document.id),
@@ -212,14 +137,6 @@ class PgVectorStore:
                 "DELETE FROM documents WHERE index_id = %s AND id = %s", (index.id, document_id)
             )
             return cur.rowcount
-
-    async def list_document_ids(self, index: IndexInfo, source: str) -> list[str]:
-        async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                "SELECT id FROM documents WHERE index_id = %s AND source = %s ORDER BY id",
-                (index.id, source),
-            )
-            return [r["id"] for r in await cur.fetchall()]
 
     async def stats(self, index: IndexInfo) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn:
@@ -369,47 +286,6 @@ class PgVectorStore:
             )
             for r in rows
         ]
-
-    # ------------------------------------------------------------------ calibration
-
-    async def get_calibration(self, index: IndexInfo, scorer: str) -> Calibration | None:
-        async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                """SELECT scorer, min_score, min_hits, metrics, dataset, calibrated_at
-                   FROM retrieval_calibrations WHERE index_id = %s AND scorer = %s""",
-                (index.id, scorer),
-            )
-            row = await cur.fetchone()
-        return Calibration(**row) if row else None
-
-    async def save_calibration(self, index: IndexInfo, calibration: Calibration) -> None:
-        async with self.pool.connection() as conn:
-            await conn.execute(
-                """INSERT INTO retrieval_calibrations
-                       (index_id, scorer, min_score, min_hits, metrics, dataset, calibrated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, now())
-                   ON CONFLICT (index_id, scorer) DO UPDATE SET
-                     min_score = EXCLUDED.min_score, min_hits = EXCLUDED.min_hits,
-                     metrics = EXCLUDED.metrics, dataset = EXCLUDED.dataset,
-                     calibrated_at = now()""",
-                (
-                    index.id,
-                    calibration.scorer,
-                    calibration.min_score,
-                    calibration.min_hits,
-                    json.dumps(calibration.metrics),
-                    calibration.dataset,
-                ),
-            )
-
-    async def list_calibrations(self, index: IndexInfo) -> list[Calibration]:
-        async with self.pool.connection() as conn:
-            cur = await conn.execute(
-                """SELECT scorer, min_score, min_hits, metrics, dataset, calibrated_at
-                   FROM retrieval_calibrations WHERE index_id = %s ORDER BY scorer""",
-                (index.id,),
-            )
-            return [Calibration(**r) for r in await cur.fetchall()]
 
 
 @registry.register("vector_store", "pgvector")

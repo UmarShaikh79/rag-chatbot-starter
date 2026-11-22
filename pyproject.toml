@@ -1,6 +1,6 @@
 [project]
 name = "rag-chatbot-starter"
-version = "0.3.0"
+version = "0.4.0"
 description = "Clone-and-own boilerplate for a config-driven RAG chatbot backend (FastAPI, Postgres, pgvector)."
 readme = "README.md"
 license = "MIT"
@@ -30,7 +30,11 @@ presidio = [
 rerank = [
     "sentence-transformers>=3.0",
 ]
-# Later milestones add extras here: ollama, langgraph, qdrant, langfuse, otel, graphql.
+# Qdrant as the vector store (vector_store.backend: qdrant). Ollama needs no extra: httpx.
+qdrant = [
+    "qdrant-client>=1.15",
+]
+# Later milestones add extras here: langgraph, langfuse, otel, graphql.
 
 [project.scripts]
 chatbot = "chatbot.cli:main"
@@ -55,10 +59,17 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+filterwarnings = [
+    # Qdrant's in-process local mode (used by the tests) ignores payload indexes and HNSW.
+    "ignore:Payload indexes have no effect:UserWarning",
+    "ignore:Local mode performs exact:UserWarning",
+]
 markers = [
     "integration: needs Postgres with pgvector (set TEST_DATABASE_URL)",
     "e2e: full ingest-to-answer path against Postgres",
     "live: calls the real OpenAI API (set OPENAI_API_KEY and RUN_LIVE_TESTS=1)",
+    "qdrant: Qdrant store (in-process local mode, or a server when QDRANT_TEST_URL is set)",
+    "ollama: a real Ollama server (set OLLAMA_TEST_URL; models must be pulled)",
 ]
 
 [tool.ruff]

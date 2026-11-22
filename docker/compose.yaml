@@ -1,14 +1,25 @@
 # Local stack: Postgres + pgvector, a one-shot migration, the API and the worker.
 #   docker compose -f docker/compose.yaml --env-file .env up --build
 # (or just `make up`)
+#
+# Optional services, off unless their profile is named (milestone 4):
+#   --profile ollama   local models; `ollama-pull` fetches the models of local-ollama.yaml
+#                      (make up-ollama; set CHATBOT_PROFILE=local-ollama in .env)
+#   --profile qdrant   Qdrant as the vector store; build with the qdrant extra
+#                      (make up-qdrant; set CHATBOT__VECTOR_STORE__BACKEND=qdrant in .env)
 
 x-app: &app
   build:
     context: ..
     dockerfile: docker/Dockerfile
+    args:
+      UV_EXTRAS: ${UV_EXTRAS:-}     # e.g. "--extra qdrant"
   env_file: ../.env
   environment:
     DATABASE_URL: postgresql://chatbot:chatbot@postgres:5432/chatbot
+    # Used only when a profile selects them; harmless otherwise.
+    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+    QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
   depends_on:
     postgres:
       condition: service_healthy
@@ -57,5 +68,49 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # ---------------------------------------------------------------- optional services
+
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:0.40.17
+    ports: ["11434:11434"]
+    volumes:
+      - ollama:/root/.ollama          # pulled models survive restarts
+    # GPU (NVIDIA): uncomment, and install the NVIDIA Container Toolkit on the host.
+    # On macOS, Docker has no GPU access: run Ollama natively instead and set
+    # OLLAMA_BASE_URL=http://host.docker.internal:11434 in .env.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  ollama-pull:                        # one-shot: pulls the models config/models.yaml names
+    profiles: ["ollama"]
+    image: ollama/ollama:0.40.17
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - ${OLLAMA_MODELS_CMD:-ollama pull nomic-embed-text && ollama pull gemma3:4b && ollama pull qwen3.5:9b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  qdrant:
+    profiles: ["qdrant"]
+    image: qdrant/qdrant:v1.20.2
+    ports: ["6333:6333", "6334:6334"]   # HTTP, gRPC
+    volumes:
+      - qdrant:/qdrant/storage
+    # Set QDRANT__SERVICE__API_KEY here and QDRANT_API_KEY in .env to require a key.
+
 volumes:
   pgdata:
+  ollama:
+  qdrant:

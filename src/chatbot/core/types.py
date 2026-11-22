@@ -114,6 +114,34 @@ class IndexInfo(BaseModel):
     dims: int
     chunker_version: str
     text_config: str = "english"  # Postgres text search config used for BM25 (ADR 020)
+    backend: str = "pgvector"  # the vector store that holds its vectors (ADR 024)
+
+
+class IndexSummary(BaseModel):
+    """One physical index as ``chatbot index list`` shows it (ADR 023)."""
+
+    name: str
+    backend: str
+    embedding_model: str
+    dims: int
+    chunker_version: str
+    status: Literal["building", "ready"]
+    aliases: list[str] = []  # aliases that point at it now
+    previous_of: list[str] = []  # aliases that point at it as their rollback target
+    documents: int = 0
+    created_at: datetime | None = None
+    ready_at: datetime | None = None
+    build_report: dict[str, Any] = {}
+
+
+class StoredDocument(BaseModel):
+    """A document as an index stored it. ``document`` is None for rows written before the
+    index kept parsed text (migration 0004); re-indexing cannot rebuild those on its own."""
+
+    id: str
+    source: str
+    user_id: str | None = None
+    document: ParsedDocument | None = None
 
 
 class Calibration(BaseModel):

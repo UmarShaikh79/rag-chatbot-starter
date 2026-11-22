@@ -3,6 +3,41 @@
 This is a template you copy and own (ADR 001). Each entry lists what changed and, when it
 matters, how to bring the change into a copy you have already modified.
 
+## 0.4.0: milestone 4
+
+Local and alternative providers, and safe re-indexing.
+
+- Ollama adapters over its native API (ADR 025): chat with streaming, structured output,
+  `keep_alive`, `num_ctx` and `think: false` (any `<think>` block is stripped), and
+  embeddings with task prefixes. New `local-ollama` profile (answer, cheap and
+  `nomic-embed-text`, alias `docs_local`); a missing model fails with the `ollama pull` to run.
+- Qdrant as a second vector store (ADR 024, `uv sync --extra qdrant`,
+  `vector_store.backend: qdrant`, `vector_store.qdrant.*`). Postgres keeps the catalog for
+  every store (`chatbot.stores.catalog`); `forget_user` also deletes the user's Qdrant points.
+- Re-indexing without downtime (ADR 023): `chatbot reindex` builds an index for the current
+  configuration behind `<alias>_next` (resumable, with a catch-up pass), `chatbot index
+  activate | rollback | drop | list`. Retrievers still refuse an index built with another
+  embedding model, and the error now names the fix. Indexes can move between pgvector and
+  Qdrant the same way.
+- SQL record source (`type: sql`): one document per row from any SQLAlchemy database, streamed
+  in batches, with metadata columns, owner column and templates.
+- Compose profiles `ollama` (with a one-shot model pull) and `qdrant`; `make up-ollama`,
+  `make up-qdrant`, `make reindex`, `make index-*`. CI runs the Qdrant tests against a real
+  server too.
+- Operations guides: [pgvector](docs/operations/pgvector.md) (query settings, index builds,
+  autovacuum, `REINDEX INDEX CONCURRENTLY`, memory) and
+  [re-indexing](docs/operations/reindexing.md).
+- ADRs 023-025.
+
+Upgrading a copy of 0.3.0: run `chatbot migrate` (migration 0004 adds `vector_indexes.backend`,
+`status`, `ready_at`, `build_report`, `index_aliases.previous_index_id` and
+`documents.sections`). Documents ingested before it keep no parsed text: sources re-read them
+during a re-index, but documents pushed through the API must be pushed again (or left out with
+`chatbot reindex --allow-missing`). If you changed `PgVectorStore`, note that its index and
+calibration methods moved to the `CatalogStore` base class; `physical_name` is still
+importable from `chatbot.stores.pgvector`. `IngestionPipeline.sync_source` takes an optional
+`index`, and `ingest_parsed` is split out of `ingest_document`.
+
 ## 0.3.0: milestone 3
 
 Retrieval quality and evals.

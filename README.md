@@ -20,10 +20,11 @@ tests/       unit, integration (Postgres), e2e   docker/  Dockerfile + Compose  
 
 | Area | Default | Switch with |
 | --- | --- | --- |
-| LLM | OpenAI, by profile name (`answer`, `cheap`) | `config/models.yaml`, `models.*` |
-| Embeddings | OpenAI `text-embedding-3-small` (1536) | `models.embed` |
-| Vector store | Postgres + pgvector 0.8 (HNSW, iterative scan for filters) | `vector_store.*` |
-| Ingestion | Files (Markdown, text, HTML, PDF, DOCX) and inline documents via API; Postgres job queue | `ingestion.*` |
+| LLM | OpenAI, by profile name (`answer`, `cheap`); local models through Ollama | `config/models.yaml`, `models.*`, `CHATBOT_PROFILE=local-ollama` |
+| Embeddings | OpenAI `text-embedding-3-small` (1536); Ollama `nomic-embed-text` (768) locally | `models.embed` |
+| Vector store | Postgres + pgvector 0.8 (HNSW, iterative scan for filters); Qdrant | `vector_store.backend` |
+| Re-indexing | New embedder, chunker or store: build beside the live index, switch the alias, roll back | `chatbot reindex`, `chatbot index` |
+| Ingestion | Files (Markdown, text, HTML, PDF, DOCX), rows from any SQL database, inline documents via API; Postgres job queue | `ingestion.*` |
 | Chunking | Structure-aware recursive, 512 tokens, 64 overlap | `ingestion.chunker.*` |
 | Retrieval | Dense, `top_k: 8`; BM25, hybrid (RRF), HyDE, query rewriting and rerank (Cohere or local cross-encoder) one setting away | `retrieval.*` |
 | Thresholds | `min_score` + `min_hits`, calibrated per index and pipeline on the golden set | `chatbot calibrate` |
@@ -35,7 +36,7 @@ tests/       unit, integration (Postgres), e2e   docker/  Dockerfile + Compose  
 | Auth | API keys (hashed), JWT/OIDC bearer tokens, or both | `auth.mode` |
 | Observability | JSON logs with a trace ID per request; token counts (and cost, if prices are set) in every response | `observability.*` |
 
-Later milestones add Ollama, Qdrant and re-index with alias flip (M4), and OpenTelemetry, Langfuse, LangGraph and Kubernetes (M5). See [docs/roadmap.md](docs/roadmap.md).
+The next milestone adds OpenTelemetry, Langfuse, LangGraph and Kubernetes (M5). See [docs/roadmap.md](docs/roadmap.md).
 
 ## Quickstart (Docker)
 
@@ -79,6 +80,30 @@ The **offline** profile swaps in a hashing embedder and an extractive fake LLM s
 pipeline runs without network access. It quotes sentences rather than writing answers, and it
 cannot judge relevance well; use it for plumbing, demos and CI, not for quality.
 
+## Local models (Ollama) and Qdrant
+
+Both are optional services in the Compose file, off until you name their profile:
+
+```bash
+make up-ollama    # adds Ollama and pulls the models; then CHATBOT_PROFILE=local-ollama in .env
+make up-qdrant    # adds Qdrant; then CHATBOT__VECTOR_STORE__BACKEND=qdrant in .env
+```
+
+Without Docker: install [Ollama](https://ollama.com), pull the three models named in
+`config/models.yaml` (`ollama pull nomic-embed-text`, and so on), and run with
+`CHATBOT_PROFILE=local-ollama`. Nothing leaves the
+machine. Local scores sit on their own scale, so run `chatbot calibrate --apply` after ingesting.
+
+An index belongs to one embedding model, chunker and store. To switch an existing deployment,
+build the new index beside the live one and flip the alias when it is ready:
+
+```bash
+chatbot reindex          # with the new config; the API keeps serving the old index
+chatbot index activate   # switch (and `chatbot index rollback` to go back)
+```
+
+See [docs/operations/reindexing.md](docs/operations/reindexing.md).
+
 ## Using it from your app
 
 ```bash
@@ -101,14 +126,17 @@ Endpoints and the SSE event contract: [docs/api.md](docs/api.md).
 ## Tests
 
 ```bash
-make test-unit       # ~160 fast tests, no database
+make test-unit       # ~190 fast tests, no database
 make test-db         # integration + end-to-end against Postgres (TEST_DATABASE_URL)
 make lint
 ```
 
 The e2e suite runs the real path (API, Postgres job, worker, pgvector, chat) with the offline
 profile. `tests/e2e/test_live_openai.py` runs against OpenAI when `OPENAI_API_KEY` and
-`RUN_LIVE_TESTS=1` are set. CI runs lint and all non-live tests against a pgvector service.
+`RUN_LIVE_TESTS=1` are set, and `tests/e2e/test_live_ollama.py` against Ollama when
+`OLLAMA_TEST_URL` is set. Qdrant tests run Qdrant's in-process mode (`uv sync --extra qdrant`),
+or a server when `QDRANT_TEST_URL` is set. CI runs lint and all non-live tests against pgvector
+and Qdrant services.
 
 ## Evals and calibration
 
@@ -128,6 +156,8 @@ the floors in `evals/gate.yaml` or on a drop from `evals/baselines/offline.json`
 - [Configuration reference](docs/configuration.md)
 - [HTTP API and streaming contract](docs/api.md)
 - [Extending: add a source, parser, retriever, detector, guard or provider](docs/extending.md)
+- [Re-indexing: new embedding model, chunker or store](docs/operations/reindexing.md)
+- [Operating pgvector: tuning, autovacuum, HNSW rebuilds](docs/operations/pgvector.md)
 - [Roadmap](docs/roadmap.md)
 - [Architecture decision records](docs/adr/README.md)
 

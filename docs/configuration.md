@@ -19,15 +19,24 @@ them (`OPENAI_API_KEY`, `CHATBOT_API_KEYS`, `DATABASE_URL`).
 | `dev` | Local development with OpenAI; readable text logs |
 | `prod` | JSON logs, message text never logged |
 | `offline` | No API key: hashing embedder + extractive fake LLM, own index alias, own thresholds |
+| `local-ollama` | Local models through Ollama (chat and `nomic-embed-text`), own index alias `docs_local` |
 
 ## Sections
 
 ### `models` and `config/models.yaml`
 
 `models.answer`, `models.cheap` and `models.embed` name entries in `models.yaml`. Each LLM entry
-has `provider` (`openai`, `fake`), `model`, `api_key_env`, optional `base_url` (any
-OpenAI-compatible endpoint), `params` passed to the API, and `price_per_mtok` (`input`,
-`output`; leave `null` to omit cost). Embedding entries also have `dims`. Reranker entries
+has `provider` (`openai`, `ollama`, `fake`), `model`, `api_key_env`, optional `base_url` (any
+OpenAI-compatible endpoint, or the Ollama server), `params` passed to the API, and
+`price_per_mtok` (`input`, `output`; leave `null` to omit cost). Embedding entries also have
+`dims` and `params`.
+
+Ollama (ADR 025): the base URL is the profile's `base_url`, else `OLLAMA_BASE_URL`, else
+`http://localhost:11434`; `api_key_env` adds a bearer token (hosted Ollama or a proxy). Chat
+`params`: `options` (passed to Ollama, e.g. `num_ctx`, `temperature`), `keep_alive`, `think`
+(`false` for thinking models), `timeout_s`. Embedding `params`: `document_prefix`,
+`query_prefix`, `keep_alive`, `truncate`, `timeout_s`. Unknown params fail at startup. The
+Ollama tags were read from the Ollama library on 2026-11-22; choose ones that fit your hardware. Reranker entries
 (`rerankers:`) have `provider` (`cohere`, `cross_encoder`, `lexical`), `model`, `api_key_env`,
 `base_url` and `params`; the Cohere IDs were read from Cohere's rerank docs on 2026-11-22.
 
@@ -38,6 +47,7 @@ clone; only `models.yaml` needs to change.
 
 | Key | Default | Notes |
 | --- | --- | --- |
+| `backend` | `pgvector` | `pgvector` or `qdrant` (ADR 024). Changing it needs `chatbot reindex`. |
 | `index` | `docs` | Alias. The physical index name adds the embedding model and dims (ADR 005). |
 | `hnsw.m`, `hnsw.ef_construction` | 16, 64 | Applied when the index is created. |
 | `hnsw.ef_search` | 100 | Per query. Higher: better recall, slower. |
@@ -45,11 +55,38 @@ clone; only `models.yaml` needs to change.
 | `hnsw.max_scan_tuples` | 20000 | Upper bound for iterative scans. |
 | `exact_scan_threshold` | 2000 | Filters matching at most this many chunks use an exact scan. |
 | `text_search_config` | `english` | Postgres text search config for BM25, recorded with each new index (ADR 020). |
+| `qdrant.url_env` / `qdrant.url` | `QDRANT_URL` / `http://localhost:6333` | Server address; the env var wins. |
+| `qdrant.api_key_env` | `QDRANT_API_KEY` | For Qdrant Cloud or a secured server; ignored when unset. |
+| `qdrant.location` | `null` | `":memory:"` runs Qdrant in-process (tests only). |
+| `qdrant.hnsw.m` / `qdrant.hnsw.ef_construct` | 16 / 100 | Applied when a collection is created. |
+| `qdrant.hnsw_ef` | 128 | Search beam width per query. |
+| `qdrant.on_disk` | `false` | Keep vectors on disk (memmap) when they outgrow RAM. |
+| `qdrant.upsert_batch`, `prefer_grpc`, `timeout_s` | 256, `false`, 30 | Client settings. |
+
+Whatever the backend, Postgres keeps the catalog: index rows, aliases, document hashes and
+parsed text, calibrations. Changing the embedder, its prefixes, the chunker or the backend
+means a new physical index: see [operations/reindexing.md](operations/reindexing.md). Tuning
+pgvector in production: [operations/pgvector.md](operations/pgvector.md).
 
 ### `ingestion`
 
 `sources` is a list of `{name, type, path, include, options}`. `type: files` walks `path`
 (relative to the repo root) for the `include` globs. Document IDs are `<source>:<relative path>`.
+
+`type: sql` turns each row of a query into a document, from any database SQLAlchemy reaches
+(Postgres works as installed; add a driver such as `pymysql` for others). `options`:
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `url_env` | `DATABASE_URL` | Env var with the database URL. Use a read-only user. |
+| `query` | required | Runs in full on each sync; rows that disappear are removed from the index. |
+| `id_column` | required | Document ID becomes `<source>:<value>`. |
+| `text_columns` / `text_template` | one required | Columns joined by blank lines, or a format string like `"# {title}\n\n{body}"`. |
+| `title_column`, `uri_template` | `null` | Title and link shown in citations. |
+| `metadata_columns` | `[]` | Copied to chunk metadata, usable as retrieval filters. |
+| `user_id_column` | `null` | Rows owned by an end user; `forget_user` deletes their documents. |
+| `media_type` | `text/markdown` | Or `text/plain`, `text/html`. |
+| `batch_size` | 500 | Rows fetched per round trip. |
 
 `chunker`: `size_tokens` (512), `overlap_tokens` (64), `tokenizer` (`approx` counts 4 characters
 per token and needs no download; `tiktoken` is exact but needs the `tiktoken` package). Changing

@@ -33,8 +33,9 @@ database:
   pool_max: 10
 
 vector_store:
-  backend: pgvector
+  backend: pgvector                 # pgvector | qdrant (ADR 024; `uv sync --extra qdrant`)
   index: docs                       # alias; the physical index records embed model + dims (ADR 005)
+                                    # changing the embedder, chunker or backend: `chatbot reindex` (ADR 023)
   distance: cosine
   hnsw:                             # ADR 012; needs pgvector >= 0.8
     m: 16
@@ -44,6 +45,17 @@ vector_store:
     max_scan_tuples: 20000
   exact_scan_threshold: 2000        # filters matching <= this many chunks skip HNSW and scan exactly
   text_search_config: english       # Postgres text search config for BM25; fixed per index (ADR 020)
+  qdrant:                           # used when backend: qdrant; Postgres still keeps the catalog
+    url_env: QDRANT_URL             # http://localhost:6333 when unset (see url)
+    url: http://localhost:6333
+    api_key_env: QDRANT_API_KEY     # Qdrant Cloud; ignored when the variable is unset
+    location: null                  # ":memory:" = in-process local mode, for tests only
+    prefer_grpc: false
+    timeout_s: 30
+    hnsw: {m: 16, ef_construct: 100}
+    hnsw_ef: 128                    # search beam width (like pgvector's ef_search)
+    on_disk: false                  # memmap vectors instead of holding them in RAM
+    upsert_batch: 256
 
 ingestion:
   sources:
@@ -51,6 +63,16 @@ ingestion:
       type: files
       path: samples/docs
       include: ["*.pdf", "*.md", "*.docx", "*.html", "*.txt"]
+    # Rows from your app's database, one document per row (any SQLAlchemy database):
+    # - name: articles
+    #   type: sql
+    #   options:
+    #     url_env: APP_DATABASE_URL
+    #     query: SELECT id, title, body, category FROM help_articles WHERE published
+    #     id_column: id
+    #     title_column: title
+    #     text_columns: [title, body]
+    #     metadata_columns: [category]
   chunker:
     type: recursive
     size_tokens: 512
