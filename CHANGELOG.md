@@ -5,6 +5,14 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- License changed from MIT to the **Apache License 2.0** (`LICENSE`, new `NOTICE`,
+  `pyproject.toml`, README). Apache 2.0 is as permissive for users and adds an explicit patent
+  grant from contributors. Copies taken before this change stay under MIT.
+- README rewritten for first-time readers: real answers from the sample corpus (with citations,
+  a clarifying question, PII redaction, an injection refusal, streaming), a zero-key quick start
+  checked against `.env.example`, a feature overview, measured quality per setup, a diagram of
+  the flow, use cases beyond support bots, client examples (curl, Python, browser streaming) and
+  a docs map by goal.
 - Readability pass for a mixed audience (no behaviour change): dense one-liners unfolded into
   named steps (the API-key versus JWT routing in `auth/api_key.py`, mixed `and`/`or`
   conditions, two nested conditional expressions, comprehensions with several loops); long
@@ -28,8 +36,7 @@ matters, how to bring the change into a copy you have already modified.
     and `/openapi.json` off. ADR 017 described single-page apps calling the API with their
     token, which browsers blocked without CORS.
   - `CONTRIBUTING.md` (setup, checks, how to send a change, code style for a mixed audience),
-    `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), issue and pull
-    request templates.
+    `SECURITY.md` (private vulnerability reporting), issue and pull request templates.
   - Workflows run with a read-only token (`permissions: contents: read`); Dependabot opens
     weekly updates for Python (uv), GitHub Actions and the Docker base image.
   In a copy you have modified: nothing to do; add `api.cors.allow_origins` if a browser app
