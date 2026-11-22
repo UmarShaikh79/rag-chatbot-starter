@@ -36,8 +36,7 @@ matters, how to bring the change into a copy you have already modified.
     and `/openapi.json` off. ADR 017 described single-page apps calling the API with their
     token, which browsers blocked without CORS.
   - `CONTRIBUTING.md` (setup, checks, how to send a change, code style for a mixed audience),
-    `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), issue and pull
-    request templates.
+    `SECURITY.md` (private vulnerability reporting), issue and pull request templates.
   - Workflows run with a read-only token (`permissions: contents: read`); Dependabot opens
     weekly updates for Python (uv), GitHub Actions and the Docker base image.
   In a copy you have modified: nothing to do; add `api.cors.allow_origins` if a browser app

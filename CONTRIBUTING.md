@@ -74,7 +74,3 @@ is imported last, so its registrations win.
 ## Reporting security issues
 
 Please don't open a public issue. See [SECURITY.md](SECURITY.md).
-
-## Code of conduct
-
-Everyone taking part agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).

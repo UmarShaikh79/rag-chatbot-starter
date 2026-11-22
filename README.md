@@ -394,9 +394,8 @@ Kubernetes manifests and the eval gate all run in CI on every pull request.
 ## Contributing
 
 Questions, fixes and ideas are welcome from everyone, beginners included: if something confused
-you, it confuses others too. Start with [CONTRIBUTING.md](CONTRIBUTING.md); please read the
-[Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately
-([SECURITY.md](SECURITY.md)).
+you, it confuses others too. Start with [CONTRIBUTING.md](CONTRIBUTING.md), and report security
+issues privately ([SECURITY.md](SECURITY.md)).
 
 ## License
 
