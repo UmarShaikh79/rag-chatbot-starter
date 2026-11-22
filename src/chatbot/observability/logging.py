@@ -27,6 +27,11 @@ def reset_trace_id(token: contextvars.Token[str | None]) -> None:
     _trace_id.reset(token)
 
 
+def peek_trace_id() -> str | None:
+    """The current trace ID, or None outside a request or job (unlike get_trace_id)."""
+    return _trace_id.get()
+
+
 def get_trace_id() -> str:
     tid = _trace_id.get()
     if tid is None:

@@ -1,0 +1,20 @@
+# Scale the API on CPU. Requests mostly wait on the model provider, so CPU stays low under
+# load; if it never trips, scale on request rate instead (custom metrics, KEDA).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chatbot-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chatbot-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

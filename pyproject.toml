@@ -1,6 +1,6 @@
 [project]
 name = "rag-chatbot-starter"
-version = "0.4.0"
+version = "0.5.0"
 description = "Clone-and-own boilerplate for a config-driven RAG chatbot backend (FastAPI, Postgres, pgvector)."
 readme = "README.md"
 license = "MIT"
@@ -34,7 +34,22 @@ rerank = [
 qdrant = [
     "qdrant-client>=1.15",
 ]
-# Later milestones add extras here: langgraph, langfuse, otel, graphql.
+# OpenTelemetry traces and metrics over OTLP/HTTP (observability.otel, ADR 026).
+otel = [
+    "opentelemetry-sdk>=1.45",
+    "opentelemetry-exporter-otlp-proto-http>=1.45",
+]
+# Langfuse as a tracing backend (observability.langfuse, ADR 027). Same packages as otel:
+# spans go to Langfuse's OTLP endpoint, so the Langfuse SDK is not needed.
+langfuse = [
+    "opentelemetry-sdk>=1.45",
+    "opentelemetry-exporter-otlp-proto-http>=1.45",
+]
+# LangGraph as the orchestrator (orchestrator: langgraph, ADR 029). Plain Python is the default.
+langgraph = [
+    "langgraph>=1.2",
+]
+# GraphQL is still open (docs/roadmap.md).
 
 [project.scripts]
 chatbot = "chatbot.cli:main"

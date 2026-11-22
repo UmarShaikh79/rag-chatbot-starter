@@ -1,0 +1,14 @@
+# Adds an OpenTelemetry Collector and points the chatbot at it. The app must be built with
+# the otel extra. Edit collector.yaml to send traces and metrics to your backend.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - collector.yaml
+
+configMapGenerator:
+  - name: chatbot-config
+    behavior: merge
+    literals:
+      - CHATBOT__OBSERVABILITY__OTEL__ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318

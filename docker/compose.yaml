@@ -7,6 +7,9 @@
 #                      (make up-ollama; set CHATBOT_PROFILE=local-ollama in .env)
 #   --profile qdrant   Qdrant as the vector store; build with the qdrant extra
 #                      (make up-qdrant; set CHATBOT__VECTOR_STORE__BACKEND=qdrant in .env)
+#   --profile otel     an OpenTelemetry Collector and Jaeger (traces at localhost:16686,
+#                      metrics at localhost:8889/metrics); build with the otel extra
+#                      (make up-otel; set CHATBOT__OBSERVABILITY__OTEL__ENABLED=true in .env)
 
 x-app: &app
   build:
@@ -20,6 +23,7 @@ x-app: &app
     # Used only when a profile selects them; harmless otherwise.
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
   depends_on:
     postgres:
       condition: service_healthy
@@ -109,6 +113,23 @@ services:
     volumes:
       - qdrant:/qdrant/storage
     # Set QDRANT__SERVICE__API_KEY here and QDRANT_API_KEY in .env to require a key.
+
+  otel-collector:
+    profiles: ["otel"]
+    image: otel/opentelemetry-collector-contrib:0.165.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP/HTTP, for an app running outside Docker
+      - "8889:8889"   # Prometheus metrics: curl localhost:8889/metrics
+    depends_on: [jaeger]
+
+  jaeger:
+    profiles: ["otel"]
+    image: jaegertracing/jaeger:2.23.0
+    ports:
+      - "16686:16686" # UI: http://localhost:16686
 
 volumes:
   pgdata:

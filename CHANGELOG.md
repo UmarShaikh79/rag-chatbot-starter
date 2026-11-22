@@ -3,6 +3,50 @@
 This is a template you copy and own (ADR 001). Each entry lists what changed and, when it
 matters, how to bring the change into a copy you have already modified.
 
+## 0.5.0: milestone 5
+
+Observability, cost accounting, an optional LangGraph orchestrator and a Kubernetes example.
+
+- Tracing and metrics (ADR 026, `uv sync --extra otel`, `observability.otel.*`): a small facade
+  (`span`, `count`, `observe` in `chatbot.observability.tracing`) that does nothing until a
+  backend is on. Spans for each request (continuing a W3C `traceparent`), each chat turn and
+  its steps, each model and embedding call (GenAI conventions, tokens, cost), each job.
+  Metrics for turns, latency, tokens, cost, weak retrieval, guard blocks, jobs and HTTP.
+  OTLP/HTTP to wherever `OTEL_EXPORTER_OTLP_*` points. With tracing on, `trace_id` is the
+  OpenTelemetry trace ID. Text on spans is off by default and always the redacted text.
+- Langfuse (ADR 027, `uv sync --extra langfuse`, `observability.langfuse.*`) through its OTLP
+  endpoint, without the Langfuse SDK: turns as traces with user and session, generations with
+  model, tokens and cost, typed retrieval, guard and evaluator steps.
+- Token and cost accounting (ADR 028): models are wrapped once in the container, so every call
+  is priced from `price_per_mtok` and recorded. Migration 0005 adds `usage_records` (one row
+  per chat turn, job and `ingest --inline`, with a per-call breakdown); `GET /v1/usage` (admin)
+  and `chatbot usage` report by day, user, model or operation. `forget_user` unlinks the user
+  from their rows (`usage_records_anonymised`).
+- LangGraph (ADR 029, `uv sync --extra langgraph`, `orchestrator: langgraph`): the turn is now
+  a list of step methods on `SimpleOrchestrator` sharing a `TurnState`; the LangGraph adapter
+  runs the same steps as graph nodes, with identical events and responses (tested). The
+  `orchestrator` setting now selects from the registry (it was ignored before).
+- Kubernetes example (ADR 030, `deploy/k8s`): Kustomize base (API, worker, nightly ingest
+  CronJob, PDB), `dev` overlay with in-cluster pgvector and the offline profile, `prod`
+  overlay with HPA, SSE-ready ingress and network policy, and an OpenTelemetry Collector
+  component. CI renders and validates them with kubeconform.
+- `/livez` (process only) and `/readyz` (database) beside `/healthz`; probes are no longer
+  traced or access-logged.
+- `chatbot migrate` takes a Postgres advisory lock, so concurrent runs migrate once.
+- Compose profile `otel` (Collector + Jaeger, `make up-otel`); `make usage`, `make k8s-render`.
+- CI: tests run with the `otel` and `langgraph` extras, a `test-base` job runs the unit tests
+  with no extras, and a `k8s` job validates the manifests.
+- `chatbot.__version__` now matches the package version.
+- Guide: [docs/observability.md](docs/observability.md); ADRs 026-030.
+
+Upgrading a copy of 0.4.0: run `chatbot migrate` (migration 0005 adds `usage_records`). If
+you changed `SimpleOrchestrator._flow`, move your changes into the step method they belong to
+(`check_input`, `retrieve`, `answer`, `clarify`, `check_grounded`, `check_output`); state that
+was local to `_flow` now lives on `TurnState`. `container.build` wraps LLMs and embedders in
+`MeteredLLM` / `MeteredEmbedder` and the orchestrator in `MeteredOrchestrator`; other attributes
+pass through, and `chatbot.observability.instrument.unwrap` returns the original.
+`Components` has a new `usage_store` field. `Worker` takes an optional `usage_store`.
+
 ## 0.4.0: milestone 4
 
 Local and alternative providers, and safe re-indexing.

@@ -38,14 +38,44 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync --frozen --extra qdrant
+      - run: uv sync --frozen --extra qdrant --extra otel --extra langgraph
       # Unit, integration and end-to-end (offline profile); the Qdrant tests use the
-      # in-process local mode here. Live OpenAI and Ollama tests stay opt-in.
+      # in-process local mode here, the OpenTelemetry tests in-memory exporters. Live OpenAI
+      # and Ollama tests stay opt-in.
       - run: uv run pytest -ra
       # The Qdrant store again, against a real server (payload indexes, HNSW, gRPC-free REST).
       - run: uv run pytest -ra -m qdrant
         env:
           QDRANT_TEST_URL: http://localhost:6333
+
+  # The base install (no extras) must import and pass on its own: every optional module
+  # (OpenTelemetry, Langfuse, LangGraph, Qdrant) stays optional.
+  test-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run pytest -ra tests/unit
+
+  # The Kubernetes example (ADR 030) renders and validates against the API schemas.
+  k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: Render and validate each overlay
+        run: |
+          for overlay in deploy/k8s/overlays/*/; do
+            echo "::group::$overlay"
+            kubectl kustomize "$overlay" | kubeconform -strict -summary -kubernetes-version 1.33.0 -
+            echo "::endgroup::"
+          done
 
   # The regression gate (ADR 010, ADR 022): ingest the sample corpus with the offline profile,
   # calibrate thresholds on the golden set, then fail the build below evals/gate.yaml floors

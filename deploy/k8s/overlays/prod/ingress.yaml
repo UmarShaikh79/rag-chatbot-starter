@@ -1,0 +1,27 @@
+# ingress-nginx shown. SSE needs response buffering off and a read timeout longer than the
+# longest answer; other controllers have their own switches for the same two things.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chatbot-api
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m
+    # cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [chatbot.YOUR_DOMAIN]
+      secretName: chatbot-tls
+  rules:
+    - host: chatbot.YOUR_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chatbot-api
+                port:
+                  name: http

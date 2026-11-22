@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from chatbot import __version__
 from chatbot.api.middleware import TraceMiddleware
-from chatbot.api.routes import chat, health, ingest, memory
+from chatbot.api.routes import chat, health, ingest, memory, usage
 from chatbot.auth.api_key import Authenticator
 from chatbot.auth.principal import require_admin
 from chatbot.core import container
@@ -18,6 +18,7 @@ from chatbot.core.errors import ForbiddenError, IndexMismatchError, NotFoundErro
 from chatbot.core.settings import Settings, get_settings
 from chatbot.db import make_pool
 from chatbot.observability.logging import configure_logging, get_trace_id
+from chatbot.observability.tracing import configure_telemetry, shutdown_telemetry
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         owned = components is None
         if owned:
+            configure_telemetry(settings, "api")  # no-op unless otel or langfuse is on
             pool = make_pool(settings)
             await pool.open(wait=True, timeout=30)
             app.state.components = container.build(settings, pool)
@@ -49,6 +51,7 @@ def create_app(
         finally:
             if owned:
                 await app.state.components.close()
+                shutdown_telemetry()
 
     app = FastAPI(
         title=settings.app.name,
@@ -65,6 +68,7 @@ def create_app(
     app.include_router(chat.router, dependencies=protected)
     app.include_router(ingest.router, dependencies=admin_only)
     app.include_router(memory.router, dependencies=protected)
+    app.include_router(usage.router, dependencies=admin_only)
 
     def error(status: int, message: str) -> JSONResponse:
         return JSONResponse({"detail": message, "trace_id": get_trace_id()}, status_code=status)

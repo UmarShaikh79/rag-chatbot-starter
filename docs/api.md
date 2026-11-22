@@ -8,7 +8,9 @@ an API key or the admin scope. Interactive docs are served at `/docs`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/healthz` | Liveness and database check (public) |
+| GET | `/healthz` | Database check (public); same as `/readyz` |
+| GET | `/livez` | Liveness: the process answers, no dependency checked (public) |
+| GET | `/readyz` | Readiness: the database answers (public) |
 | POST | `/v1/chat` | Ask a question (JSON, or SSE with `stream: true` / `Accept: text/event-stream`) |
 | POST | `/v1/ingest` | Queue a sync of a configured source, or ingest inline documents |
 | GET | `/v1/jobs/{id}` | Job status and result report |
@@ -17,6 +19,7 @@ an API key or the admin scope. Interactive docs are served at `/docs`.
 | GET | `/v1/users/{user_id}/memory` | Long-term facts remembered about the user, most recent first |
 | DELETE | `/v1/users/{user_id}/memory/facts/{fact_id}` | Forget one fact (204) |
 | DELETE | `/v1/users/{user_id}/memory` | Delete everything stored for a user; returns counts per table |
+| GET | `/v1/usage` | Tokens and cost by `group_by` = `day`, `user`, `model` or `operation`; `since`, `until`, `user_id` filters (admin) |
 
 Errors return `{"detail": "...", "trace_id": "..."}`: 401 bad key or token, 403 conversation
 owned by another user (or a JWT user reaching for another user or an admin route), 404 unknown
@@ -147,4 +150,30 @@ Show these to the user if you like; `DELETE /v1/users/{user_id}/memory/facts/7` 
 ```
 
 With Qdrant as the store, the user's vectors are deleted from it first and counted as
-`vector_points`.
+`vector_points`. Usage records are kept for accounting but unlinked from the user
+(`usage_records_anonymised`).
+
+## Tracing headers
+
+Every response carries `X-Trace-Id`. Send a W3C `traceparent` header and, with tracing on, the
+chatbot's spans join your trace and `trace_id` is that trace's ID. Without tracing, an
+`X-Request-Id` of 8-64 letters, digits, `-` or `_` is used as the trace ID.
+
+## GET /v1/usage
+
+Admin only (API key or the admin scope). Sums `usage_records` (ADR 028):
+
+```bash
+curl -s "localhost:8000/v1/usage?group_by=model&since=2026-11-01T00:00:00Z" -H "X-API-Key: $KEY"
+```
+
+```json
+{"group_by": "model", "since": "2026-11-01T00:00:00Z", "until": null,
+ "rows": [{"key": "gpt-…", "operations": 412, "prompt_tokens": 210554, "completion_tokens": 18210,
+           "embedding_tokens": 0, "cost_usd": 0.41, "unpriced_calls": 0}],
+ "total": {"key": null, "operations": 412, "...": "..."}}
+```
+
+`operations` counts turns and jobs, or calls when grouped by model. `cost_usd` sums priced calls
+only; `unpriced_calls` says how many had no price in `config/models.yaml`. Returns 404 when
+records are off (`observability.usage.persist: false`, or no Postgres).

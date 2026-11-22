@@ -9,6 +9,9 @@ from pydantic import BaseModel
 
 from chatbot.core.types import (
     Calibration,
+    ChatEvent,
+    ChatRequest,
+    ChatResponse,
     Chunk,
     Completion,
     ConversationContext,
@@ -249,3 +252,28 @@ class JobQueue(Protocol):
     async def fail(self, job_id: str, error: str) -> None: ...
 
     async def get(self, job_id: str) -> Job | None: ...
+
+
+@runtime_checkable
+class Orchestrator(Protocol):
+    """Runs a chat turn. ``orchestrator: simple | langgraph | yours`` picks one from the
+    registry (ADR 003, ADR 029); ``stream`` yields deltas, then exactly one terminal event."""
+
+    async def run(self, req: ChatRequest) -> ChatResponse: ...
+
+    def stream(self, req: ChatRequest) -> AsyncIterator[ChatEvent]: ...
+
+
+@runtime_checkable
+class UsageStore(Protocol):
+    """Where usage records go and the reports over them (ADR 028)."""
+
+    async def record(self, rec: Any) -> None: ...
+
+    async def report(
+        self,
+        group_by: str = "day",
+        since: Any = None,
+        until: Any = None,
+        user_id: str | None = None,
+    ) -> Any: ...

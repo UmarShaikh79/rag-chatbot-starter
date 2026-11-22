@@ -17,7 +17,7 @@ them (`OPENAI_API_KEY`, `CHATBOT_API_KEYS`, `DATABASE_URL`).
 | Profile | Use |
 | --- | --- |
 | `dev` | Local development with OpenAI; readable text logs |
-| `prod` | JSON logs, message text never logged |
+| `prod` | JSON logs, message text never logged (the Kubernetes example uses it) |
 | `offline` | No API key: hashing embedder + extractive fake LLM, own index alias, own thresholds |
 | `local-ollama` | Local models through Ollama (chat and `nomic-embed-text`), own index alias `docs_local` |
 
@@ -251,5 +251,29 @@ TOKEN=$(uv run chatbot dev-token --sub alice)
 ### `observability`
 
 `log_level`, `log_format` (`json` or `text`), `log_message_text` (false: user and model text
-never reach logs). Every request gets a trace ID (or reuses a safe `X-Request-Id`), returned in
-the `X-Trace-Id` header and in chat responses.
+never reach logs). Every request gets a trace ID, returned in the `X-Trace-Id` header and in
+chat responses: the OpenTelemetry trace ID when tracing is on, otherwise a safe `X-Request-Id`
+or a new one. The full guide is [observability.md](observability.md).
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `otel.enabled` | `false` | Traces and metrics over OTLP/HTTP (ADR 026). Needs `uv sync --extra otel`. Destination: `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`. |
+| `otel.service_name` | `null` | Default `app.name`; `OTEL_SERVICE_NAME` wins. |
+| `otel.traces`, `otel.metrics` | `true`, `true` | Either can be turned off. |
+| `otel.metrics_interval_s` | 30 | How often metrics are pushed. |
+| `otel.sample_ratio` | 1.0 | Share of new traces kept; a sampled parent always wins. |
+| `otel.capture_text` | `false` | Redacted prompts, answers and chunk IDs on spans. |
+| `otel.console` | `false` | Also print spans to stdout. |
+| `langfuse.enabled` | `false` | Langfuse over its OTLP endpoint (ADR 027). Needs `uv sync --extra langfuse`. |
+| `langfuse.base_url_env` / `base_url` | `LANGFUSE_BASE_URL` / `https://cloud.langfuse.com` | The env var wins. US cloud: `https://us.cloud.langfuse.com`. |
+| `langfuse.public_key_env`, `secret_key_env` | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Missing keys fail at startup. |
+| `langfuse.capture_text` | `true` | Redacted text goes to Langfuse; `forget_user` cannot delete it there. |
+| `langfuse.send_user_id` | `true` | The caller's `user_id` as the Langfuse user. |
+| `usage.persist` | `true` | A `usage_records` row per chat turn, job and `ingest --inline` (ADR 028). Needs Postgres. |
+
+### `orchestrator`
+
+`simple` (default): the plain-Python turn in `orchestration/simple.py` (ADR 003). `langgraph`:
+the same steps as a LangGraph graph (ADR 029), for flows that need tools, loops or human
+approval; needs `uv sync --extra langgraph`. Any name registered with
+`@registry.register("orchestrator", "...")` works too.

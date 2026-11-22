@@ -391,10 +391,54 @@ class EvalsSection(Strict):
     calibration: CalibrationOptions = CalibrationOptions()
 
 
+class OtelOptions(Strict):
+    """OpenTelemetry traces and metrics over OTLP/HTTP (ADR 026; `uv sync --extra otel`).
+
+    Where they go is the standard OTel environment: OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_HEADERS, OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES.
+    """
+
+    enabled: bool = False
+    service_name: str | None = None  # default: app.name (OTEL_SERVICE_NAME wins)
+    traces: bool = True
+    metrics: bool = True
+    metrics_interval_s: float = Field(30.0, ge=1.0)
+    sample_ratio: float = Field(1.0, ge=0.0, le=1.0)  # share of new traces kept
+    # Prompts, answers and retrieved text on spans. Off: spans carry sizes, scores, models,
+    # tokens and cost only. The text is the redacted text the guards produced either way.
+    capture_text: bool = False
+    console: bool = False  # also print finished spans to stdout (local debugging)
+
+
+class LangfuseOptions(Strict):
+    """Langfuse as a tracing backend, fed over its OTLP endpoint (ADR 027). Needs the same
+    packages as otel (`uv sync --extra langfuse`), not the Langfuse SDK."""
+
+    enabled: bool = False
+    base_url_env: str = "LANGFUSE_BASE_URL"  # unset -> base_url below
+    base_url: str = "https://cloud.langfuse.com"  # EU cloud; https://us.cloud.langfuse.com, ...
+    public_key_env: str = "LANGFUSE_PUBLIC_KEY"
+    secret_key_env: str = "LANGFUSE_SECRET_KEY"
+    # Langfuse is for reading conversations, so text is on by default here. It is the
+    # redacted text (guardrails run first), but it does leave your infrastructure and
+    # forget_user cannot delete it there (ADR 015, ADR 027).
+    capture_text: bool = True
+    send_user_id: bool = True  # the caller's user_id as the Langfuse user
+
+
+class UsageOptions(Strict):
+    """Token and cost accounting (ADR 028). Prices come from price_per_mtok in models.yaml."""
+
+    persist: bool = True  # one usage_records row per chat turn, job or CLI run
+
+
 class ObservabilitySection(Strict):
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"
     log_message_text: bool = False
+    otel: OtelOptions = OtelOptions()
+    langfuse: LangfuseOptions = LangfuseOptions()
+    usage: UsageOptions = UsageOptions()
 
 
 # ---------------------------------------------------------------- models.yaml
@@ -449,7 +493,7 @@ class Settings(Strict):
     guardrails: GuardrailsSection = GuardrailsSection()
     evals: EvalsSection = EvalsSection()
     observability: ObservabilitySection = ObservabilitySection()
-    orchestrator: str = "simple"
+    orchestrator: str = "simple"  # simple | langgraph (ADR 029) | any you register
     catalog: ModelCatalog = ModelCatalog()
     # Not from YAML: where config and prompts were loaded from.
     root_dir: Path = Path(".")

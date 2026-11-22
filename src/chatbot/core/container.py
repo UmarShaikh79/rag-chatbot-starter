@@ -25,6 +25,7 @@ from chatbot.core.prompts import PromptRegistry
 from chatbot.core.registry import registry
 from chatbot.core.settings import Settings
 from chatbot.guardrails.pipeline import GuardPipeline
+from chatbot.observability.instrument import MeteredEmbedder, MeteredLLM, MeteredOrchestrator
 
 BUILTIN_MODULES = [
     "chatbot.providers.llm.openai",
@@ -47,6 +48,8 @@ BUILTIN_MODULES = [
     "chatbot.guardrails.groundedness",
     "chatbot.guardrails.pii",
     "chatbot.guardrails.injection",
+    "chatbot.orchestration.simple",
+    "chatbot.orchestration.langgraph",  # imports langgraph only when it is selected
     "chatbot.domain",  # last: your overrides win
 ]
 
@@ -71,6 +74,21 @@ def make_chunker(settings: Settings) -> Chunker:
     return registry.create("chunker", cfg.type, cfg)
 
 
+def metered_llm(settings: Settings, role: str, llm: LLM) -> LLM:
+    """Tracing, metrics and cost accounting around any LLM (ADR 026, ADR 028)."""
+    if isinstance(llm, MeteredLLM):
+        return llm
+    profile = settings.llm_profile(role)
+    return MeteredLLM(llm, role, profile.provider, profile.price_per_mtok)  # type: ignore[return-value]
+
+
+def metered_embedder(settings: Settings, embedder: Embedder) -> Embedder:
+    if isinstance(embedder, MeteredEmbedder):
+        return embedder
+    profile = settings.embed_profile()
+    return MeteredEmbedder(embedder, profile.provider, profile.price_per_mtok)  # type: ignore[return-value]
+
+
 def make_source(settings: Settings, name: str) -> Any:
     cfg = settings.source(name)
     return registry.create("source", cfg.type, cfg, settings.root_dir)
@@ -93,6 +111,7 @@ class Components:
     orchestrator: Any
     pipeline: Any
     memory_manager: Any = None
+    usage_store: Any = None  # where usage records go (ADR 028); None: not stored
     extras: dict[str, Any] = field(default_factory=dict)
 
     async def close(self) -> None:
@@ -114,7 +133,7 @@ def build(
     from chatbot.ingestion.pipeline import IngestionPipeline
     from chatbot.memory.manager import MemoryManager
     from chatbot.memory.postgres import PostgresMemoryStore
-    from chatbot.orchestration.simple import SimpleOrchestrator
+    from chatbot.observability.accounting import PostgresUsageStore
     from chatbot.retrieval.pipeline import build_pipeline
     from chatbot.retrieval.rewrite import QueryRewriter
 
@@ -122,9 +141,15 @@ def build(
         return overrides[name] if name in overrides else factory()
 
     alias = settings.vector_store.index
-    answer_llm = part("answer_llm", lambda: make_llm(settings, "answer"))
-    cheap_llm = part("cheap_llm", lambda: make_llm(settings, "cheap"))
-    embedder = part("embedder", lambda: make_embedder(settings))
+    # Every model call is wrapped once here: a span, token and cost metrics, and an entry in
+    # the usage ledger. Providers stay plain adapters.
+    answer_llm = metered_llm(
+        settings, "answer", part("answer_llm", lambda: make_llm(settings, "answer"))
+    )
+    cheap_llm = metered_llm(
+        settings, "cheap", part("cheap_llm", lambda: make_llm(settings, "cheap"))
+    )
+    embedder = metered_embedder(settings, part("embedder", lambda: make_embedder(settings)))
     chunker = part("chunker", lambda: make_chunker(settings))
     store = part(
         "store",
@@ -163,19 +188,35 @@ def build(
         "memory_manager",
         lambda: MemoryManager(settings.memory, memory, cheap_llm, prompts, guards, queue),
     )
+    usage_store = part(
+        "usage_store",
+        lambda: (
+            PostgresUsageStore(pool)
+            if pool is not None and settings.observability.usage.persist
+            else None
+        ),
+    )
+    # orchestrator: simple (default) | langgraph | any you register. Whichever it is, one
+    # wrapper gives every turn a root span, turn metrics and a usage record.
     orchestrator = part(
         "orchestrator",
-        lambda: SimpleOrchestrator(
-            settings,
-            answer_llm,
-            cheap_llm,
-            retriever,
-            memory,
-            guards,
-            prompts,
-            memory_manager,
-            rewriter,
-            judge,
+        lambda: MeteredOrchestrator(
+            registry.create(
+                "orchestrator",
+                settings.orchestrator,
+                settings,
+                answer_llm=answer_llm,
+                cheap_llm=cheap_llm,
+                retriever=retriever,
+                memory=memory,
+                guards=guards,
+                prompts=prompts,
+                memory_manager=memory_manager,
+                rewriter=rewriter,
+                judge=judge,
+            ),
+            settings.orchestrator,
+            usage_store,
         ),
     )
     pipeline = part(
@@ -200,5 +241,6 @@ def build(
         orchestrator=orchestrator,
         pipeline=pipeline,
         memory_manager=memory_manager,
+        usage_store=usage_store,
         extras={"rewriter": rewriter, "judge": judge},
     )

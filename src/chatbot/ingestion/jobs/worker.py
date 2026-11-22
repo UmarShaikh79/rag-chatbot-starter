@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from chatbot.core.interfaces import JobQueue
 from chatbot.core.types import Job
+from chatbot.observability.instrument import metered_operation
 from chatbot.observability.logging import new_trace_id, reset_trace_id, set_trace_id
+from chatbot.observability.tracing import count, observe
 
 log = logging.getLogger(__name__)
 
@@ -24,11 +27,13 @@ class Worker:
         handlers: dict[str, Handler],
         concurrency: int = 2,
         poll_interval_s: float = 1.0,
+        usage_store: Any | None = None,
     ) -> None:
         self.queue = queue
         self.handlers = handlers
         self.concurrency = concurrency
         self.poll_interval_s = poll_interval_s
+        self.usage_store = usage_store  # each job's model calls become a usage record
 
     async def run_once(self) -> bool:
         """Claim and run one job. Returns False when the queue had nothing to do."""
@@ -36,17 +41,34 @@ class Worker:
         if job is None:
             return False
         token = set_trace_id(new_trace_id())
+        started = time.perf_counter()
+        status = "succeeded"
         try:
-            log.info(
-                "job started", extra={"job_id": job.id, "kind": job.kind, "attempt": job.attempts}
-            )
-            result = await self.handlers[job.kind](job)
-            await self.queue.complete(job.id, result)
+            async with metered_operation(
+                f"job:{job.kind}",
+                self.usage_store,
+                user_id=job.payload.get("user_id"),
+                attrs={"chatbot.job.id": job.id, "chatbot.job.attempt": job.attempts},
+            ) as span:
+                log.info(
+                    "job started",
+                    extra={"job_id": job.id, "kind": job.kind, "attempt": job.attempts},
+                )
+                try:
+                    result = await self.handlers[job.kind](job)
+                except Exception as exc:
+                    span.fail(exc)
+                    raise
+                await self.queue.complete(job.id, result)
             log.info("job succeeded", extra={"job_id": job.id, "kind": job.kind})
         except Exception as exc:
+            status = "failed"
             log.exception("job failed", extra={"job_id": job.id, "kind": job.kind})
             await self.queue.fail(job.id, f"{type(exc).__name__}: {exc}")
         finally:
+            seconds = time.perf_counter() - started
+            count("chatbot.jobs", 1, {"chatbot.job.kind": job.kind, "chatbot.job.status": status})
+            observe("chatbot.jobs.duration", seconds, {"chatbot.job.kind": job.kind})
             reset_trace_id(token)
         return True
 

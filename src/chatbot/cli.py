@@ -13,11 +13,13 @@ from chatbot.core.errors import ChatbotError
 from chatbot.core.settings import ConfigError, get_settings, load_settings
 
 
-async def _components():
+async def _components(role: str = "cli"):
     from chatbot.core import container
     from chatbot.db import make_pool
+    from chatbot.observability.tracing import configure_telemetry
 
     settings = get_settings()
+    configure_telemetry(settings, role)  # no-op unless otel or langfuse is on (ADR 026)
     pool = make_pool(settings)
     await pool.open(wait=True, timeout=30)
     return container.build(settings, pool)
@@ -53,11 +55,13 @@ async def _worker() -> None:
     from chatbot.ingestion.jobs.worker import Worker
     from chatbot.observability.logging import configure_logging
 
-    c = await _components()
+    c = await _components("worker")
     obs = c.settings.observability
     configure_logging(obs.log_level, obs.log_format)
     wcfg = c.settings.ingestion.worker
-    worker = Worker(c.queue, make_handlers(c), wcfg.concurrency, wcfg.poll_interval_s)
+    worker = Worker(
+        c.queue, make_handlers(c), wcfg.concurrency, wcfg.poll_interval_s, c.usage_store
+    )
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -81,11 +85,14 @@ async def _ingest(args: argparse.Namespace) -> dict[str, Any]:
     try:
         names = [args.source] if args.source else [s.name for s in c.settings.ingestion.sources]
         if args.inline:
+            from chatbot.observability.instrument import metered_operation
+
             reports = {}
             for name in names:
-                report = await c.pipeline.sync_source(
-                    make_source(c.settings, name), force=args.force
-                )
+                async with metered_operation(f"ingest:{name}", c.usage_store):
+                    report = await c.pipeline.sync_source(
+                        make_source(c.settings, name), force=args.force
+                    )
                 reports[name] = report.model_dump(mode="json")
             return reports
         jobs = {
@@ -98,7 +105,7 @@ async def _ingest(args: argparse.Namespace) -> dict[str, Any]:
         }
         if not args.wait:
             return {"queued": jobs}
-        await Worker(c.queue, make_handlers(c)).drain()
+        await Worker(c.queue, make_handlers(c), usage_store=c.usage_store).drain()
         out = {}
         for name, job_id in jobs.items():
             job = await c.queue.get(job_id)
@@ -148,7 +155,14 @@ async def _eval_components():
     settings = get_settings()
     pool = make_pool(settings)
     await pool.open(wait=True, timeout=30)
-    return container.build(settings, pool, memory=InMemoryMemoryStore(), queue=InMemoryJobQueue())
+    # Eval runs are not billed to anyone: no usage records (metrics and traces still flow).
+    return container.build(
+        settings,
+        pool,
+        memory=InMemoryMemoryStore(),
+        queue=InMemoryJobQueue(),
+        usage_store=None,
+    )
 
 
 def _profile() -> str:
@@ -362,6 +376,45 @@ def cmd_dev_token(args: argparse.Namespace) -> None:
     print(sign_dev_token(secret, args.sub, jwt_cfg.issuer, jwt_cfg.audience, args.ttl, scopes))
 
 
+async def _usage(args: argparse.Namespace) -> Any:
+    from datetime import UTC, datetime, timedelta
+
+    from chatbot.db import make_pool
+    from chatbot.observability.accounting import PostgresUsageStore
+
+    settings = get_settings()
+    pool = make_pool(settings)
+    await pool.open(wait=True, timeout=30)
+    try:
+        since = datetime.now(UTC) - timedelta(days=args.days) if args.days else None
+        return await PostgresUsageStore(pool).report(args.by, since=since, user_id=args.user)
+    finally:
+        await pool.close()
+
+
+def cmd_usage(args: argparse.Namespace) -> None:
+    report = asyncio.run(_usage(args))
+    if args.json:
+        print(report.model_dump_json(indent=2))
+        return
+    cols = ("ops", "prompt", "completion", "embedding")
+    print(f"{args.by:<28} {cols[0]:>6} " + " ".join(f"{c:>10}" for c in cols[1:]) + " cost_usd")
+    for row in [*report.rows, report.total.model_copy(update={"key": "TOTAL"})]:
+        cost = "n/a" if row.cost_usd is None else f"{row.cost_usd:.4f}"
+        if row.unpriced_calls:
+            cost += "*"
+        print(
+            f"{row.key or '(none)':<28} {row.operations:>6} {row.prompt_tokens:>10} "
+            f"{row.completion_tokens:>10} {row.embedding_tokens:>10} {cost:>12}"
+        )
+    if report.total.unpriced_calls:
+        print(
+            f"* {report.total.unpriced_calls} calls had no price: set price_per_mtok in "
+            "config/models.yaml (ADR 028)",
+            file=sys.stderr,
+        )
+
+
 def cmd_check_config(_: argparse.Namespace) -> None:
     settings = load_settings()
     print(json.dumps(settings.model_dump(mode="json", exclude={"catalog"}), indent=2))
@@ -453,6 +506,13 @@ def main(argv: list[str] | None = None) -> None:
     dt.add_argument("--admin", action="store_true", help="add the admin scope")
     dt.set_defaults(func=cmd_dev_token)
 
+    us = sub.add_parser("usage", help="tokens and cost from usage records (ADR 028)")
+    us.add_argument("--by", choices=["day", "user", "model", "operation"], default="day")
+    us.add_argument("--days", type=int, default=30, help="look back this many days (0: all)")
+    us.add_argument("--user", help="only this user_id")
+    us.add_argument("--json", action="store_true")
+    us.set_defaults(func=cmd_usage)
+
     sub.add_parser("check-config", help="print the merged configuration").set_defaults(
         func=cmd_check_config
     )
@@ -466,6 +526,10 @@ def main(argv: list[str] | None = None) -> None:
     except ChatbotError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
+    finally:
+        from chatbot.observability.tracing import shutdown_telemetry
+
+        shutdown_telemetry()  # flush spans and metrics before the process exits
 
 
 if __name__ == "__main__":

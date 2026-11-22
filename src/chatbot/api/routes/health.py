@@ -21,3 +21,16 @@ async def healthz(c: Components = Depends(components)) -> JSONResponse:
             db = "unavailable"
     ok = db != "unavailable"
     return JSONResponse({"status": "ok" if ok else "degraded", "database": db}, 200 if ok else 503)
+
+
+@router.get("/livez")
+async def livez() -> JSONResponse:
+    """Liveness: the process answers. Never checks dependencies, so a database outage
+    does not make Kubernetes restart every pod."""
+    return JSONResponse({"status": "ok"})
+
+
+@router.get("/readyz")
+async def readyz(c: Components = Depends(components)) -> JSONResponse:
+    """Readiness: same check as /healthz (the database answers), for load balancers."""
+    return await healthz(c)
