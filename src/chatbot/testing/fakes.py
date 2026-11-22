@@ -334,10 +334,10 @@ class InMemoryJobQueue:
         job = self.jobs[job_id]
         job.status, job.result, job.last_error = "succeeded", result, None
 
-    async def fail(self, job_id: str, error: str) -> None:
+    async def fail(self, job_id: str, error: str, retry: bool = True) -> None:
         job = self.jobs[job_id]
         job.last_error = error
-        job.status = "failed" if job.attempts >= job.max_attempts else "queued"
+        job.status = "failed" if not retry or job.attempts >= job.max_attempts else "queued"
 
     async def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)

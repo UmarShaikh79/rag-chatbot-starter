@@ -38,6 +38,16 @@ async def test_retry_with_backoff_then_fail(db):
     assert await queue.claim(["k"]) is None
 
 
+async def test_permanent_failure_is_not_requeued(db):
+    queue = PostgresJobQueue(db, backoff_base_s=0)
+    job_id = await queue.enqueue("k", {}, max_attempts=3)
+    job = await queue.claim(["k"])
+    await queue.fail(job.id, "PermissionDeniedError: 403", retry=False)
+    job = await queue.get(job_id)
+    assert job.status == "failed" and job.attempts == 1
+    assert await queue.claim(["k"]) is None
+
+
 async def test_abandoned_job_is_reclaimed(db):
     queue = PostgresJobQueue(db, lock_timeout_s=60)
     job_id = await queue.enqueue("k", {})
