@@ -12,10 +12,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [chatbot.YOUR_DOMAIN]
+    - hosts: [chatbot.example.com]
       secretName: chatbot-tls
   rules:
-    - host: chatbot.YOUR_DOMAIN
+    - host: chatbot.example.com
       http:
         paths:
           - path: /
