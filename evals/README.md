@@ -1,6 +1,6 @@
 # Evals
 
-`datasets/golden.jsonl` holds 34 questions about the sample corpus: 24 answerable (with the
+`datasets/golden.jsonl` holds 35 questions about the sample corpus: 25 answerable (with the
 documents that hold the answer and phrases a correct answer contains) and 10 unanswerable
 ones, which should not get an answer. Replace it with questions about your own documents.
 
@@ -76,5 +76,5 @@ migrate, ingest the samples, `calibrate --apply --check`, `eval --gate`. The nig
 | `question` | what the user asks |
 | `answerable` | false when the corpus does not contain the answer |
 | `expected_documents` | document IDs that contain the answer (required when answerable) |
-| `must_include` | phrases a correct answer contains (case-insensitive) |
+| `must_include` | phrases a correct answer contains. An entry may be a list of alternatives, any one of which counts (`[["not refunded", "no refund"]]`). Compared after normalizing case, quotes, dashes, markdown and contractions, so "aren't refunded" matches "not refunded" |
 | `tags` | optional labels for slicing, e.g. `exact-term` |

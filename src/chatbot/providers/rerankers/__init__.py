@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import Any
 
 from chatbot.core.errors import ProviderError
 from chatbot.core.types import ScoredChunk
@@ -38,6 +39,20 @@ def patient_reranking() -> Iterator[None]:
 
 def is_patient() -> bool:
     return _patient.get()
+
+
+def rerank_cost(
+    billed: dict[str, Any], per_ksearch: float | None, per_mtok: dict[str, float | None]
+) -> float | None:
+    """USD for one call from what the provider billed (``search_units`` or ``input_tokens``)
+    and the profile's prices. None when the billed unit has no price set."""
+    searches, tokens = billed.get("search_units"), billed.get("input_tokens")
+    if searches is not None and per_ksearch is not None:
+        return float(searches) * per_ksearch / 1000
+    per_token = per_mtok.get("input")
+    if tokens is not None and per_token is not None:
+        return float(tokens) * per_token / 1_000_000
+    return None
 
 
 def apply_scores(hits: list[ScoredChunk], scores: list[float], top_n: int) -> list[ScoredChunk]:

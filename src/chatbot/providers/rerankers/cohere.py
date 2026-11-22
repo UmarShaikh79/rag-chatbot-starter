@@ -1,8 +1,10 @@
 """Cohere Rerank over plain HTTP (no SDK): POST {base_url}/v2/rerank.
 
-Set COHERE_API_KEY (or the profile's api_key_env). Rerank calls are not priced in
-``usage.cost_usd``; Cohere reports what it bills in each response (``meta.billed_units``),
-which goes on the call's span (``rerank <model>``) with the number of attempts.
+Set COHERE_API_KEY (or the profile's api_key_env). Cohere reports what it bills in each
+response (``meta.billed_units``: search units or input tokens). That goes on the call's span
+(``rerank <model>``) with the number of attempts, and is priced with the profile's
+``price_per_ksearch`` or ``price_per_mtok.input`` into ``usage.cost_usd`` and the usage record.
+Cohere publishes no rerank prices on its pricing page; take them from your dashboard.
 
 Retries: 429, 5xx, timeouts and connection errors are retried, other 4xx are not. A chat turn
 retries twice within about 1.5 s and then lets the pipeline fall back to the retrieval order.
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
@@ -23,7 +26,8 @@ from chatbot.core.registry import registry
 from chatbot.core.settings import RerankerProfile
 from chatbot.core.types import ScoredChunk, Usage
 from chatbot.observability.tracing import SpanHandle, count, span
-from chatbot.providers.rerankers import RerankError, apply_scores, is_patient
+from chatbot.observability.usage import UsageCall, record_call
+from chatbot.providers.rerankers import RerankError, apply_scores, is_patient, rerank_cost
 
 DEFAULT_BASE_URL = "https://api.cohere.com"
 RETRY_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
@@ -51,6 +55,8 @@ class CohereReranker:
         self.base_url = (profile.base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key_env = profile.api_key_env or "COHERE_API_KEY"
         self.params = dict(profile.params)
+        self.price_per_ksearch = profile.price_per_ksearch
+        self.price_per_mtok = dict(profile.price_per_mtok)
         self.client = client
         self.sleep = sleep
 
@@ -109,18 +115,31 @@ class CohereReranker:
         }
         client = self.client or httpx.AsyncClient(timeout=30)
         attrs = {"gen_ai.request.model": self.model, "chatbot.rerank.documents": len(hits)}
+        started = time.perf_counter()
         try:
             with span(f"rerank {self.model}", attrs=attrs) as s:
                 data = await self._post(client, body, key, s)
                 billed = (data.get("meta") or {}).get("billed_units") or {}
+                cost = rerank_cost(billed, self.price_per_ksearch, self.price_per_mtok)
                 s.set({f"chatbot.rerank.billed.{k}": v for k, v in billed.items()})
+                s.set({"chatbot.rerank.cost_usd": cost})
         finally:
             if self.client is None:
                 await client.aclose()
+        record_call(
+            UsageCall(
+                kind="rerank",
+                model=self.model,
+                role="rerank",
+                purpose="rerank",
+                cost_usd=cost,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            )
+        )
         scores = [0.0] * len(hits)
         for item in data.get("results", []):
             scores[int(item["index"])] = float(item["relevance_score"])
-        return apply_scores(hits, scores, top_n), Usage()
+        return apply_scores(hits, scores, top_n), Usage(cost_usd=cost)
 
 
 @registry.register("reranker", "cohere")

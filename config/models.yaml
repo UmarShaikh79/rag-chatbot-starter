@@ -78,6 +78,11 @@ rerankers:
     provider: cohere
     model: rerank-v5.0-fast
     api_key_env: COHERE_API_KEY
+    # USD. Cohere's pricing page lists no rerank prices (checked 2026-11-22); copy yours from
+    # the Cohere dashboard. v5 responses report billed input tokens, older models search
+    # units (one query with up to 100 documents). Null: rerank calls are unpriced.
+    price_per_ksearch: null
+    price_per_mtok: {input: null}
   # Local cross-encoder; `uv sync --extra rerank`, downloads the model on first use.
   local:bge-reranker-base:
     provider: cross_encoder

@@ -253,3 +253,20 @@ async def test_calibrations_are_stored_per_scorer(db):
         "dense|dense",
         "rerank|rerank[m](dense)",
     ]
+
+
+async def test_unalias_removes_the_alias_and_keeps_the_index(db):
+    """Retiring a test index used to need SQL: drop refuses an index an alias points at."""
+    from chatbot.core.errors import ChatbotError
+
+    store = PgVectorStore(db, HnswSection())
+    info = await store.ensure_index("scratch", "m", DIMS, "v1")
+    with pytest.raises(ChatbotError, match="in use by alias scratch"):
+        await store.drop_index(info.name)
+    assert await store.remove_alias("scratch") == [info.name]
+    listed = {s.name: s for s in await store.list_indexes()}
+    assert listed[info.name].aliases == []  # the index is still there
+    assert await store.get_index("scratch") is None
+    await store.drop_index(info.name)  # and can now be dropped
+    with pytest.raises(ChatbotError, match="No alias named 'scratch'"):
+        await store.remove_alias("scratch")

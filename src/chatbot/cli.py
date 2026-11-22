@@ -358,6 +358,20 @@ async def _index_admin(args: argparse.Namespace) -> Any:
             info = await store.rollback(alias)
             print(f"'{alias}' points at {info.name} again.", file=sys.stderr)
             return info.model_dump(mode="json")
+        if args.action == "unalias":
+            if args.name == alias and not args.force:
+                raise ChatbotError(
+                    f"'{alias}' is the alias this configuration serves (vector_store.index); "
+                    "removing it takes chat and ingestion offline. Pass --force if you mean it."
+                )
+            names = await store.remove_alias(args.name)
+            if names:
+                print(
+                    f"Removed '{args.name}'. Its indexes are kept: `chatbot index drop "
+                    f"{names[0]}` deletes one that no other alias uses.",
+                    file=sys.stderr,
+                )
+            return {"removed": args.name, "indexes": names}
         if args.action == "drop":
             await store.drop_index(args.name)
             return {"dropped": args.name}
@@ -514,12 +528,17 @@ def main(argv: list[str] | None = None) -> None:
     )
     ri.set_defaults(func=cmd_reindex)
 
-    ix = sub.add_parser("index", help="list, activate, roll back or drop physical indexes")
+    ix = sub.add_parser("index", help="list, activate, roll back, unalias or drop physical indexes")
     ix_sub = ix.add_subparsers(dest="action", required=True)
     ix_sub.add_parser("list", help="every index with its aliases and status")
     act = ix_sub.add_parser("activate", help="point the alias at the index behind <alias>_next")
     act.add_argument("--force", action="store_true", help="activate an index not marked ready")
     ix_sub.add_parser("rollback", help="point the alias back at the previous index")
+    unalias = ix_sub.add_parser(
+        "unalias", help="remove an alias (a test index, a retired corpus); its indexes stay"
+    )
+    unalias.add_argument("name")
+    unalias.add_argument("--force", action="store_true", help="even the configured alias")
     drop = ix_sub.add_parser("drop", help="delete an index no alias points at")
     drop.add_argument("name")
     ix.set_defaults(func=cmd_index)

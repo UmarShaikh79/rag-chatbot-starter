@@ -483,6 +483,10 @@ class RerankerProfile(Strict):
     api_key_env: str | None = None
     base_url: str | None = None
     params: dict[str, Any] = {}
+    # Hosted rerankers bill per search unit or per input token; set whichever your provider
+    # charges (USD). Left null, rerank calls count as unpriced (usage cost is a lower bound).
+    price_per_ksearch: float | None = Field(None, ge=0)  # per 1,000 search units
+    price_per_mtok: dict[str, float | None] = {}  # {input: ...} per 1M input tokens
 
 
 class ModelCatalog(Strict):

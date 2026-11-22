@@ -29,7 +29,11 @@ def priced(usage: Usage, prices: dict[str, float | None], *, embedding: bool = F
 def priced_mixed(
     usage: Usage, llm_prices: dict[str, float | None], embed_prices: dict[str, float | None]
 ) -> Usage:
-    """Usage holding both model tokens and embedding tokens (retrieval with HyDE, say)."""
+    """Usage holding both model tokens and embedding tokens (retrieval with HyDE, say).
+
+    A cost already on ``usage`` is kept and added: providers return unpriced token counts, so
+    it can only come from a call that priced itself (a hosted reranker billed per search).
+    """
     parts = []
     if usage.prompt_tokens or usage.completion_tokens:
         parts.append(priced(usage.model_copy(update={"embedding_tokens": 0}), llm_prices))
@@ -37,6 +41,8 @@ def priced_mixed(
         parts.append(priced(usage, embed_prices, embedding=True))
     costs = [p.cost_usd for p in parts]
     cost = None if not parts or any(c is None for c in costs) else sum(costs)  # type: ignore[arg-type]
+    if usage.cost_usd is not None:
+        cost = usage.cost_usd if not parts else (None if cost is None else cost + usage.cost_usd)
     return usage.model_copy(update={"cost_usd": cost})
 
 
@@ -44,11 +50,11 @@ def priced_mixed(
 
 
 class UsageCall(BaseModel):
-    """One model or embedding call, priced with the profile's price_per_mtok."""
+    """One model, embedding or rerank call, priced with its profile's prices."""
 
-    kind: Literal["chat", "embedding"]
+    kind: Literal["chat", "embedding", "rerank"]
     model: str
-    role: str  # answer | cheap | embed
+    role: str  # answer | cheap | embed | rerank
     purpose: str  # answer, clarify, hyde, summarize, ingest, query, ...
     prompt_tokens: int = 0
     completion_tokens: int = 0

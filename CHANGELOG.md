@@ -5,6 +5,29 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: known limitations from the testing pass.
+  - Golden set: q17 ("Does Tidepool have a Linux desktop app?") was labelled unanswerable, but
+    the docs list every platform the app runs on, so "No, not Linux" is grounded. It is now
+    answerable (`samples:getting-started.md`), and q35 ("Is there a browser extension for
+    clipping web pages?") keeps 10 unanswerable questions: 35 in all. The live OpenAI suite
+    failed on q17. `evals/baselines/offline.json` re-measured (CI sequence on a fresh
+    database).
+  - `must_include` matched exact substrings, so correct rephrasings failed ("aren't refunded"
+    for "not refunded", q02, q13, q25). Answers and phrases are now compared after normalizing
+    case, quotes, dashes, markdown and contractions (`evals.metrics.normalize`), and an entry
+    may be a list of alternatives, any one of which counts.
+  - `chatbot index unalias NAME` removes an alias and its rollback pointer, keeping the indexes
+    for `index drop`; this needed SQL before. Refuses the configured alias without `--force`.
+    `CatalogStore.remove_alias` (pgvector and Qdrant); `IndexAdmin` gains `remove_alias`.
+  - `guardrails.pii.allow` ships with the sample product's names (`Tidepool`, `Tidepool
+    Notes`): Presidio tagged them as people and dropped them from questions. Replace them with
+    your own product, feature and integration names.
+  - Rerank cost: reranker profiles take `price_per_ksearch` or `price_per_mtok.input`. Cohere
+    calls are priced from the billed units in each response into `usage.cost_usd` and the
+    usage record (a `rerank` call, `kind: rerank`); `priced_mixed` no longer overwrote a cost
+    already priced. Cohere's prices ship `null` (not published on its pricing page).
+  In a copy you have modified: golden questions may now use lists in `must_include`; a custom
+  `IndexAdmin` store needs `remove_alias`; set your reranker's price in `config/models.yaml`.
 - Fix: error texts that leave the process kept credentials found in the error. A job whose
   OpenAI key was wrong stored `Incorrect API key provided: sk-inval****…wxy` in `last_error`,
   returned by `GET /v1/jobs/{id}`, and the same text went into the span status and exception

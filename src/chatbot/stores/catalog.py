@@ -315,6 +315,27 @@ class CatalogStore:
         assert info is not None
         return info
 
+    async def remove_alias(self, alias: str) -> list[str]:
+        """Delete ``alias`` and its rollback pointer. The indexes it pointed at stay (drop them
+        with ``drop_index`` once nothing else points at them). Returns their names, current
+        first."""
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (alias,))
+            cur = await conn.execute(
+                "SELECT index_id, previous_index_id FROM index_aliases WHERE alias = %s",
+                (alias,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise ChatbotError(f"No alias named '{alias}' (see `chatbot index list`)")
+            ids = [i for i in (row["index_id"], row["previous_index_id"]) if i is not None]
+            cur = await conn.execute(
+                "SELECT id, name FROM vector_indexes WHERE id = ANY(%s)", (ids,)
+            )
+            names = {r["id"]: r["name"] for r in await cur.fetchall()}
+            await conn.execute("DELETE FROM index_aliases WHERE alias = %s", (alias,))
+        return [names[i] for i in ids if i in names]
+
     async def drop_index(self, name: str) -> None:
         """Delete an index, its documents, vectors and calibrations. Refuses one that an
         alias points at; a rollback target can be dropped (rollback is then impossible)."""

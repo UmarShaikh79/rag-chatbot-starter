@@ -418,3 +418,53 @@ async def test_llm_judge_failure_follows_on_error():
     )
     result = await judge.judge("An answer.", [sc("a", 0.9, text="An answer.")])
     assert result.error and result.score == 0.0
+
+
+def test_rerank_cost_uses_whichever_unit_was_billed():
+    from chatbot.providers.rerankers import rerank_cost
+
+    assert rerank_cost({"search_units": 1}, 2.0, {}) == 0.002  # $2 per 1,000 searches
+    assert rerank_cost({"input_tokens": 1_000_000}, None, {"input": 0.05}) == 0.05
+    assert rerank_cost({"input_tokens": 1298}, None, {}) is None  # no price set: unpriced
+    assert rerank_cost({}, 2.0, {"input": 0.05}) is None
+
+
+async def test_priced_cohere_call_lands_in_usage_and_the_ledger(monkeypatch):
+    from chatbot.observability.usage import metering
+
+    monkeypatch.setenv("COHERE_API_KEY", "k")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [{"index": 0, "relevance_score": 0.9}],
+                "meta": {"billed_units": {"input_tokens": 1298}},
+            },
+        )
+
+    profile = RerankerProfile(provider="cohere", model="rerank-x", price_per_mtok={"input": 2.0})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    with metering() as ledger:
+        _, usage = await CohereReranker(profile, client).rerank("q", [sc("a", 0.9)], 1)
+    assert usage.cost_usd == pytest.approx(1298 * 2.0 / 1_000_000)
+    [call] = ledger.calls
+    assert (call.kind, call.model, call.role) == ("rerank", "rerank-x", "rerank")
+    assert call.cost_usd == usage.cost_usd
+    assert ledger.total().cost_usd == usage.cost_usd
+
+
+def test_priced_mixed_keeps_a_cost_already_priced():
+    """Retrieval usage = embedding tokens (priced by the orchestrator) + a rerank call that
+    priced itself. Before, the rerank cost was overwritten."""
+    from chatbot.core.types import Usage
+    from chatbot.observability.usage import priced_mixed
+
+    usage = Usage(embedding_tokens=10_000, cost_usd=0.003)
+    out = priced_mixed(usage, {}, {"input": 0.02})
+    assert out.cost_usd == pytest.approx(10_000 * 0.02 / 1_000_000 + 0.003)
+    assert priced_mixed(Usage(cost_usd=0.003), {}, {}).cost_usd == 0.003  # rerank only
+    assert priced_mixed(Usage(embedding_tokens=5, cost_usd=0.003), {}, {}).cost_usd is None
+    assert priced_mixed(Usage(embedding_tokens=5), {}, {"input": 0.02}).cost_usd == pytest.approx(
+        5 * 0.02 / 1_000_000
+    )

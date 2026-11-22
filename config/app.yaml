@@ -157,7 +157,11 @@ guardrails:
   pii:
     detectors: [regex]              # regex | presidio (names, places; `uv sync --extra presidio`)
     output_detectors: [regex]       # for answers (from your documents); null: same as detectors
-    allow: []                       # strings never redacted, e.g. your public support email
+    # Strings never redacted (whole detected span, any case). NER models such as presidio tag
+    # product and integration names in questions as people, so a question about them loses
+    # that word before retrieval. These are the sample product's names: replace them with your
+    # product, feature, integration and staff names, and your public support address.
+    allow: [Tidepool, Tidepool Notes]
     presidio:
       language: en
       spacy_model: en_core_web_sm

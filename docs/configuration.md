@@ -38,7 +38,11 @@ Ollama (ADR 025): the base URL is the profile's `base_url`, else `OLLAMA_BASE_UR
 `query_prefix`, `keep_alive`, `truncate`, `timeout_s`. Unknown params fail at startup. The
 Ollama tags were read from the Ollama library on 2026-11-22; choose ones that fit your hardware. Reranker entries
 (`rerankers:`) have `provider` (`cohere`, `cross_encoder`, `lexical`), `model`, `api_key_env`,
-`base_url` and `params`; the Cohere IDs were read from Cohere's rerank docs on 2026-11-22.
+`base_url`, `params` and prices: `price_per_ksearch` (USD per 1,000 search units) or
+`price_per_mtok.input` (per 1M input tokens), priced from what the provider reports it billed.
+The Cohere IDs were read from Cohere's rerank docs on 2026-11-22; Cohere lists no rerank prices
+on its pricing page, so they ship `null` (rerank calls then count as unpriced): copy yours from
+the Cohere dashboard.
 
 The OpenAI model IDs were taken from OpenAI's models page on 2026-11-21. Check them when you
 clone; only `models.yaml` needs to change.
@@ -195,7 +199,7 @@ Detectors (ADR 018):
 | --- | --- | --- |
 | `pii.detectors` | `[regex]` | `regex`: emails, phones, cards (Luhn), IBANs, US SSNs, IPv4. `presidio`: adds names, places and more. Spans from all detectors are merged. |
 | `pii.output_detectors` | `[regex]` | Detectors for answers (output guard, streamed drafts, stored answers). `null` uses `pii.detectors`. Answers come from your documents, where NER mislabels content (see below). |
-| `pii.allow` | `[]` | Exact strings never redacted, e.g. your public support address. |
+| `pii.allow` | `[Tidepool, Tidepool Notes]` | Strings never redacted (a whole detected span, any case). Ships with the sample product's names: replace them with your product, feature, integration and staff names and your public support address. |
 | `pii.presidio.*` | `en`, `en_core_web_sm`, 0.5 | `language`, `spacy_model`, `entities`, `score_threshold`. |
 | `injection.detectors` | `[heuristic]` | `heuristic`: rules on normalised text (zero-width, leetspeak, spaced letters, base64 decoded). `llm`: a classifier prompt on a model. |
 | `injection.llm.model_role` | `cheap` | Which model profile classifies. |

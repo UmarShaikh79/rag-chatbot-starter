@@ -40,6 +40,10 @@ chatbot index rollback
 # 4. Later, free the space (see operations/pgvector.md for vacuum afterwards).
 chatbot index list
 chatbot index drop docs__text_embedding_3_small__1536
+
+# Retire an alias you no longer serve (a test index, an old corpus); its indexes stay, then
+# drop them. The alias in vector_store.index is refused without --force.
+chatbot index unalias docs_test
 ```
 
 With Docker: `make reindex`, `make index-list`, `make index-activate`, `make index-rollback`
