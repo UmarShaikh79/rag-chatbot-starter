@@ -20,6 +20,7 @@ COPY prompts ./prompts
 COPY migrations ./migrations
 COPY alembic.ini ./
 COPY samples ./samples
+COPY evals ./evals
 RUN uv sync --frozen --no-dev ${UV_EXTRAS} \
     && if [ -n "$SPACY_MODEL_URL" ]; then uv pip install "$SPACY_MODEL_URL"; fi
 
