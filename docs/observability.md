@@ -65,6 +65,13 @@ models, tokens and cost. Turn it on to see prompts, retrieved chunk IDs and scor
 The text is always what the guards produced, so PII in user messages is already redacted.
 Retrieved documents are not redacted.
 
+User and session are on every span whatever `capture_text` says: `langfuse.user.id` (the
+request's `user_id`, or the token's `sub`) and `langfuse.session.id` (the conversation), so any
+OpenTelemetry backend (Jaeger, Tempo, Honeycomb) stores them too. `langfuse.send_user_id`
+only affects what Langfuse gets, and `forget_user` cannot delete spans in those backends:
+use your own user IDs rather than emails, and set the backend's retention to match your
+privacy policy.
+
 FastAPI 0.165+ can trace and meter requests itself. The app turns that off
 (`api/app.py`, `_fastapi_telemetry`) because the template's middleware already makes the server
 span and the HTTP metric: left on, every request became two traces, was counted twice, and
@@ -126,7 +133,13 @@ Each chat turn becomes a Langfuse trace with the user (`user_id`) and session (t
 conversation), generations with model, tokens and cost, and the retrieval, guard and
 groundedness steps as typed observations. Only the chatbot's own spans are sent; HTTP spans
 (and any library spans you add) are not. It works alongside `otel` (both can be on). Self-hosted Langfuse
-needs version 3.22 or later. See ADR 027.
+needs version 3.22 or later (tested with 4.83). See ADR 027.
+
+Running Langfuse's own Compose file next to this one: keep it on its own network and point
+`LANGFUSE_BASE_URL` at the published port (`http://host.docker.internal:3000` from a
+container). Both stacks have a service named `postgres`; on one network Langfuse resolves the
+chatbot's database and fails to start. Langfuse 4 reads observations through
+`GET /api/public/v2/observations` (the older `/api/public/traces` is gone).
 
 Privacy: Langfuse gets text by default (`langfuse.capture_text: true`) because reading
 conversations is what it is for. The user messages are redacted first; retrieved documents

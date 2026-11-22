@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import time
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
@@ -258,12 +259,21 @@ class MeteredOrchestrator(_Wrapper):
         self.usage_store = usage_store
         self.operation = operation
 
-    def _attrs(self, req: ChatRequest, stream: bool) -> dict[str, Any]:
+    def _attrs(self, stream: bool, new: bool) -> dict[str, Any]:
         return {
             "chatbot.orchestrator": self.name,
             "chatbot.stream": stream,
-            "chatbot.conversation.new": req.conversation_id is None,
+            "chatbot.conversation.new": new,
         }
+
+    @staticmethod
+    def _with_conversation(req: ChatRequest) -> tuple[ChatRequest, bool]:
+        """A first turn gets its conversation ID here, before any span opens, so every span
+        of the turn carries the session, not only the root (Langfuse filters observations by
+        it). A memory store already treats an ID it has never seen as a new conversation."""
+        if req.conversation_id is not None:
+            return req, False
+        return req.model_copy(update={"conversation_id": uuid.uuid4().hex}), True
 
     async def _close(
         self,
@@ -297,11 +307,12 @@ class MeteredOrchestrator(_Wrapper):
             await self.usage_store.record(ledger.record(self.operation, trace_id))
 
     async def run(self, req: ChatRequest) -> ChatResponse:
+        req, new = self._with_conversation(req)
         with (
             _own_trace_id(),
             trace_attributes(req.user_id, req.conversation_id),
             metering() as ledger,
-            span(self.operation, type="chain", root=True, attrs=self._attrs(req, False)) as s,
+            span(self.operation, type="chain", root=True, attrs=self._attrs(False, new)) as s,
         ):
             _adopt_trace_id(s)
             ledger.user_id = req.user_id
@@ -315,11 +326,12 @@ class MeteredOrchestrator(_Wrapper):
             return resp
 
     async def stream(self, req: ChatRequest) -> AsyncIterator[ChatEvent]:
+        req, new = self._with_conversation(req)
         with (
             _own_trace_id(),
             trace_attributes(req.user_id, req.conversation_id),
             metering() as ledger,
-            span(self.operation, type="chain", root=True, attrs=self._attrs(req, True)) as s,
+            span(self.operation, type="chain", root=True, attrs=self._attrs(True, new)) as s,
         ):
             _adopt_trace_id(s)
             ledger.user_id = req.user_id
