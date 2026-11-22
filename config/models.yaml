@@ -1,0 +1,37 @@
+# Named model profiles. config/app.yaml refers to these names, never to raw model IDs,
+# so changing provider or model is a one-line edit here.
+#
+# OpenAI IDs below were read from https://developers.openai.com/api/docs/models on
+# 2026-11-21 (mid-tier and small recommendations). Check that page when you clone.
+# Prices are left null on purpose: fill them from the pricing page to get cost_usd in responses.
+
+llm:
+  openai:answer:
+    provider: openai
+    model: gpt-6.2-sol
+    api_key_env: OPENAI_API_KEY
+    params: {}
+    price_per_mtok: {input: null, output: null}
+  openai:cheap:
+    provider: openai
+    model: gpt-6-luna
+    api_key_env: OPENAI_API_KEY
+    params: {}
+    price_per_mtok: {input: null, output: null}
+  # Deterministic, offline model used by tests and the `offline` profile. Not an LLM.
+  fake:extractive:
+    provider: fake
+    model: fake-extractive
+
+embeddings:
+  openai:text-embedding-3-small:
+    provider: openai
+    model: text-embedding-3-small
+    dims: 1536
+    api_key_env: OPENAI_API_KEY
+    price_per_mtok: {input: null}
+  # Offline bag-of-words embedder for tests and demos without an API key. Lexical only.
+  hashing:384:
+    provider: hashing
+    model: hashing-v1
+    dims: 384

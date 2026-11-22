@@ -1,0 +1,49 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 512 >>
+stream
+BT
+/F1 11 Tf
+14 TL
+72 760 Td
+/F1 16 Tf (Keyboard shortcuts) Tj T* /F1 11 Tf
+(Tidepool Notes desktop app \(fictional product\). On macOS use Cmd instead of Ctrl.) Tj T*
+(Ctrl+N creates a new note.) Tj T*
+(Ctrl+Shift+N creates a new notebook.) Tj T*
+(Ctrl+K opens quick search across all notebooks.) Tj T*
+(Ctrl+Shift+T adds a tag to the current note.) Tj T*
+(Ctrl+Alt+S forces a sync.) Tj T*
+(Ctrl+Shift+E exports the current note as Markdown.) Tj T*
+(Shortcuts can be changed under Settings > Keyboard.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Title (Keyboard shortcuts) >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000804 00000 n 
+0000000874 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R /Info 6 0 R >>
+startxref
+923
+%%EOF

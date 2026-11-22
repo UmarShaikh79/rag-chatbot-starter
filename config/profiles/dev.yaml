@@ -1,0 +1,5 @@
+# Local development. Select with CHATBOT_PROFILE=dev (the default).
+app:
+  env: dev
+observability:
+  log_format: text
