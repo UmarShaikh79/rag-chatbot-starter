@@ -5,6 +5,13 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: the Kubernetes prod overlay's ingress host placeholder `chatbot.YOUR_DOMAIN` is not a
+  valid host name, so `kubectl apply -k deploy/k8s/overlays/prod --dry-run=server` (the
+  README's own check) always failed; kubeconform in CI does not check host values. The
+  placeholder is now `chatbot.example.com`, the README creates the namespace before the dry
+  run, and `tests/unit/test_k8s_manifests.py` checks ingress hosts. The dev overlay has now
+  been run on kind (Kubernetes 1.37). In a copy you have modified: nothing to do if you already
+  set your own host.
 - Fix: with OpenTelemetry on, FastAPI 0.165+ added its own request telemetry next to the
   template's. Every request became two traces (the second an empty root), was counted twice in
   `http.server.request.duration`, and every health check became a trace (22 in 10 minutes from

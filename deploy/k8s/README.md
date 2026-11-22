@@ -35,8 +35,8 @@ To use OpenAI there, set `CHATBOT_PROFILE=dev` in its `configMapGenerator` and
 
 1. Build and push an image with the extras you use:
    `docker build -f docker/Dockerfile --build-arg UV_EXTRAS="--extra otel" -t ghcr.io/you/chatbot:0.5.0 .`
-2. Edit `overlays/prod`: the image name and tag, the ingress host, and any
-   `CHATBOT__...` settings in the `configMapGenerator`.
+2. Edit `overlays/prod`: the image name and tag, the ingress host (`chatbot.example.com` in
+   `ingress.yaml`, twice), and any `CHATBOT__...` settings in the `configMapGenerator`.
 3. Create the database (Postgres with pgvector >= 0.8; Cloud SQL, RDS, Azure Database for
    PostgreSQL, Neon, Supabase and others ship it) and the Secret:
 
@@ -85,9 +85,18 @@ the Secret). See [docs/observability.md](../../docs/observability.md).
 
 ```bash
 kubectl kustomize deploy/k8s/overlays/prod             # render
+kubectl apply -f deploy/k8s/overlays/prod/namespace.yaml
 kubectl apply -k deploy/k8s/overlays/prod --dry-run=server
 ```
 
+A server dry run checks everything against your cluster's API server, including the
+`restricted` Pod Security level on the namespace. The namespace has to exist first: a dry run
+does not create it, so without the second line every namespaced object fails with
+`namespaces "chatbot" not found`.
+
 CI renders both overlays and validates them against the Kubernetes 1.33 schemas with
-kubeconform. They have not been run against a live cluster in CI. `preStop.sleep` needs
+kubeconform, which checks fields but not values such as host names;
+`tests/unit/test_k8s_manifests.py` covers the ingress hosts. The dev overlay was run by hand
+on kind (Kubernetes 1.37): migrations, probes, a database outage, a rolling restart under
+load and the CronJob. The prod overlay passes a server dry run there. `preStop.sleep` needs
 Kubernetes 1.30 or later.
