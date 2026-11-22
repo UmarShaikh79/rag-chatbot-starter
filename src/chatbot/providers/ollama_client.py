@@ -59,7 +59,9 @@ def raise_for_error(resp: httpx.Response, model: str, body: str | None = None) -
     hint = ""
     if resp.status_code == 404 and "not found" in str(detail).lower():
         hint = f" Pull it first: `ollama pull {model}` (or `make ollama-pull` with Docker)."
-    raise OllamaError(f"Ollama returned {resp.status_code} for {model}: {detail}.{hint}")
+    raise OllamaError(
+        f"Ollama returned {resp.status_code} for {model}: {detail}.{hint}", resp.status_code
+    )
 
 
 async def post_json(client: httpx.AsyncClient, path: str, payload: dict[str, Any], model: str):

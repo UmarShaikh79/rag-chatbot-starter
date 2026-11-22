@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import httpx
+
 from chatbot.ingestion.jobs.worker import Worker
 from chatbot.ingestion.sources.files import FileSource
 from chatbot.testing.fakes import InMemoryJobQueue
@@ -18,6 +20,39 @@ async def test_worker_retries_then_fails():
     job = await queue.get(job_id)
     assert calls == [1, 2, 3]
     assert job.status == "failed" and "provider down" in job.last_error
+
+
+async def test_permanent_errors_are_not_retried():
+    """A 403 (key without access to the model) fails the same way every time: one attempt."""
+    queue = InMemoryJobQueue()
+    calls = []
+    request = httpx.Request("POST", "https://api.example.com/v1/embeddings")
+
+    async def forbidden(job):
+        calls.append(job.attempts)
+        response = httpx.Response(403, request=request)
+        raise httpx.HTTPStatusError("403 Forbidden", request=request, response=response)
+
+    job_id = await queue.enqueue("embed", {}, max_attempts=3)
+    await Worker(queue, {"embed": forbidden}).drain()
+    job = await queue.get(job_id)
+    assert calls == [1]
+    assert job.status == "failed" and "403" in job.last_error
+
+
+async def test_rate_limits_are_still_retried():
+    queue = InMemoryJobQueue()
+    calls = []
+    request = httpx.Request("POST", "https://api.example.com/v1/embeddings")
+
+    async def limited(job):
+        calls.append(job.attempts)
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("429 Too Many Requests", request=request, response=response)
+
+    await queue.enqueue("embed", {}, max_attempts=3)
+    await Worker(queue, {"embed": limited}).drain()
+    assert calls == [1, 2, 3]
 
 
 async def test_dedup_key_reuses_pending_job():

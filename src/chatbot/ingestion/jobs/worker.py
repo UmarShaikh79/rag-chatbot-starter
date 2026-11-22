@@ -9,6 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from chatbot.core.errors import is_permanent
 from chatbot.core.interfaces import JobQueue
 from chatbot.core.types import Job
 from chatbot.observability.instrument import metered_operation
@@ -63,8 +64,14 @@ class Worker:
             log.info("job succeeded", extra={"job_id": job.id, "kind": job.kind})
         except Exception as exc:
             status = "failed"
-            log.exception("job failed", extra={"job_id": job.id, "kind": job.kind})
-            await self.queue.fail(job.id, f"{type(exc).__name__}: {exc}")
+            # A permanent error (bad key, no permission, not found, bad request) would fail
+            # the same way on every attempt: fail the job now instead of re-queuing it.
+            retry = not is_permanent(exc)
+            log.exception(
+                "job failed" if retry else "job failed permanently, not retried",
+                extra={"job_id": job.id, "kind": job.kind, "retry": retry},
+            )
+            await self.queue.fail(job.id, f"{type(exc).__name__}: {exc}", retry=retry)
         finally:
             seconds = time.perf_counter() - started
             count("chatbot.jobs", 1, {"chatbot.job.kind": job.kind, "chatbot.job.status": status})

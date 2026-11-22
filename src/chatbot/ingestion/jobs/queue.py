@@ -94,16 +94,18 @@ class PostgresJobQueue:
                 (json.dumps(result), job_id),
             )
 
-    async def fail(self, job_id: str, error: str) -> None:
-        """Re-queue with backoff, or mark failed once max_attempts is reached."""
+    async def fail(self, job_id: str, error: str, retry: bool = True) -> None:
+        """Re-queue with backoff, or mark failed once max_attempts is reached (or at once,
+        with ``retry=False``)."""
         async with self.pool.connection() as conn:
             await conn.execute(
                 """UPDATE jobs SET
-                     status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
+                     status = CASE WHEN NOT %s OR attempts >= max_attempts
+                                   THEN 'failed' ELSE 'queued' END,
                      run_after = now() + make_interval(secs => %s * power(2, attempts - 1)),
                      last_error = %s, locked_at = NULL, updated_at = now()
                    WHERE id = %s""",
-                (self.backoff_base_s, error[:2000], job_id),
+                (retry, self.backoff_base_s, error[:2000], job_id),
             )
 
     async def get(self, job_id: str) -> Job | None:

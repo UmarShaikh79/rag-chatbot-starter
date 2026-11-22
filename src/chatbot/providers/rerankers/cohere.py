@@ -59,6 +59,7 @@ class CohereReranker:
     ) -> Any:
         delays: Sequence[float] = PATIENT_DELAYS if is_patient() else QUICK_DELAYS
         problem = ""
+        status: int | None = None
         for attempt in range(len(delays) + 1):
             s.set({"chatbot.rerank.attempts": attempt + 1})
             if attempt:
@@ -70,15 +71,17 @@ class CohereReranker:
                     headers={"Authorization": f"Bearer {key}"},
                 )
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                problem = type(exc).__name__
+                problem, status = type(exc).__name__, None
             else:
                 if resp.status_code < 400:
                     return resp.json()
                 if resp.status_code not in RETRY_STATUS:
                     raise RerankError(
-                        f"Cohere rerank failed: HTTP {resp.status_code} {resp.text[:200]}"
+                        f"Cohere rerank failed: HTTP {resp.status_code} {resp.text[:200]}",
+                        resp.status_code,
                     )
                 problem = f"HTTP {resp.status_code}"
+                status = resp.status_code
                 if attempt < len(delays):
                     wait = _retry_after(resp)
                     if wait is not None and (is_patient() or wait <= delays[attempt]):
@@ -86,7 +89,9 @@ class CohereReranker:
                         continue
             if attempt < len(delays):
                 await self.sleep(delays[attempt])
-        raise RerankError(f"Cohere rerank failed after {len(delays) + 1} attempts: {problem}")
+        raise RerankError(
+            f"Cohere rerank failed after {len(delays) + 1} attempts: {problem}", status
+        )
 
     async def rerank(
         self, query: str, hits: list[ScoredChunk], top_n: int
@@ -95,7 +100,7 @@ class CohereReranker:
             return [], Usage()
         key = os.environ.get(self.api_key_env)
         if not key:
-            raise RerankError(f"Set {self.api_key_env} to use the Cohere reranker")
+            raise RerankError(f"Set {self.api_key_env} to use the Cohere reranker", permanent=True)
         body: dict[str, Any] = {
             "model": self.model,
             "query": query,
