@@ -92,8 +92,16 @@ class Chunk(BaseModel):
 
 class ScoredChunk(BaseModel):
     chunk: Chunk
-    score: float  # higher is better; cosine similarity for dense retrieval
-    retriever: str
+    score: float  # higher is better; what the final ordering used (cosine, BM25, RRF, rerank)
+    retriever: str  # which step produced ``score``: dense, bm25, hybrid, rerank
+    # Every score this chunk picked up on the way, by step: {"dense": 0.61, "bm25": 7.2, ...}.
+    # Weak-retrieval thresholds apply to one of these (retrieval.gate), never to a fused rank.
+    scores: dict[str, float] = {}
+
+    def gate_score(self, gate: str) -> float | None:
+        if gate in self.scores:
+            return self.scores[gate]
+        return self.score if self.retriever == gate else None
 
 
 class IndexInfo(BaseModel):
@@ -105,8 +113,24 @@ class IndexInfo(BaseModel):
     embedding_model: str
     dims: int
     chunker_version: str
-    min_score: float | None = None  # calibrated thresholds (ADR 011); None = uncalibrated
-    min_hits: int | None = None
+    text_config: str = "english"  # Postgres text search config used for BM25 (ADR 020)
+
+
+class Calibration(BaseModel):
+    """Thresholds calibrated on the golden set for one index and one retrieval pipeline.
+
+    ``scorer`` names the score the thresholds apply to and every step that shapes it, e.g.
+    ``rerank|rerank[rerank-v5.0-fast](hybrid(dense,bm25))``. Change any step and the stored
+    calibration no longer matches, so the provisional config values (and a warning) apply
+    until you run ``chatbot calibrate`` again (ADR 011, ADR 021).
+    """
+
+    scorer: str
+    min_score: float
+    min_hits: int
+    metrics: dict[str, Any] = {}
+    dataset: str = ""
+    calibrated_at: datetime | None = None
 
 
 # ---------------------------------------------------------------- chat

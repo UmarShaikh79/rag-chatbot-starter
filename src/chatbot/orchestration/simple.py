@@ -1,9 +1,11 @@
 """The default orchestrator: plain async Python, one readable function per step.
 
 Flow per turn:
-  input guards -> load history, summary and user facts -> retrieve -> context guard
-  -> weak? -> clarify | answer -> citation alignment -> output guards (on the complete text,
-  in every mode) -> persist (redacted) -> schedule memory refresh -> terminal event
+  input guards -> load history, summary and user facts -> rewrite the query (optional)
+  -> retrieve (dense | bm25 | hybrid, HyDE and rerank optional) -> context guard
+  -> weak? -> clarify | answer -> citation alignment -> groundedness check (optional)
+  -> output guards (on the complete text, in every mode) -> persist (redacted)
+  -> schedule memory refresh -> terminal event
 
 ``stream`` and ``run`` share one implementation. In draft_then_final mode, delta events
 carry draft text through a PII-safe rolling buffer and exactly one terminal event follows
@@ -31,12 +33,14 @@ from chatbot.core.types import (
     Turn,
     Usage,
 )
+from chatbot.guardrails.groundedness import Judgement
 from chatbot.guardrails.pii import StreamRedactor
 from chatbot.guardrails.pipeline import GuardPipeline
 from chatbot.memory.manager import MemoryManager, format_memory
 from chatbot.observability.logging import get_trace_id
-from chatbot.observability.usage import priced
+from chatbot.observability.usage import priced, priced_mixed
 from chatbot.orchestration.citations import align, format_sources
+from chatbot.retrieval.rewrite import QueryRewriter
 from chatbot.retrieval.weak import assess
 
 log = logging.getLogger(__name__)
@@ -57,6 +61,8 @@ class SimpleOrchestrator:
         guards: GuardPipeline,
         prompts: PromptRegistry,
         memory_manager: MemoryManager | None = None,
+        rewriter: QueryRewriter | None = None,
+        judge: Any = None,
     ) -> None:
         self.settings = settings
         self.answer_llm = answer_llm
@@ -66,6 +72,8 @@ class SimpleOrchestrator:
         self.guards = guards
         self.prompts = prompts
         self.memory_manager = memory_manager
+        self.rewriter = rewriter
+        self.judge = judge  # groundedness judge; used when guardrails.output.groundedness_check
         self.prices = {
             "answer": settings.llm_profile("answer").price_per_mtok,
             "cheap": settings.llm_profile("cheap").price_per_mtok,
@@ -216,11 +224,18 @@ class SimpleOrchestrator:
         if cfg.observability.log_message_text:
             log.info("question", extra={"text": question})
 
-        # 2. Retrieve, then drop retrieved chunks that look like injected instructions.
-        hits, embed_usage = await self.retriever.retrieve(
-            question, cfg.retrieval.top_k, req.filters
+        # 2. Retrieve (with a standalone rewrite of follow-ups when enabled), then drop
+        #    retrieved chunks that look like injected instructions.
+        query = question
+        if self.rewriter is not None:
+            query, rewrite_usage = await self.rewriter.rewrite(question, ctx.history)
+            usage = usage.add(priced(rewrite_usage, self.prices["cheap"]))
+            if cfg.observability.log_message_text and query != question:
+                log.info("query rewritten", extra={"text": query})
+        hits, retrieval_usage = await self.retriever.retrieve(
+            query, cfg.retrieval.top_k, req.filters
         )
-        usage = usage.add(priced(embed_usage, self.prices["embed"], embedding=True))
+        usage = usage.add(priced_mixed(retrieval_usage, self.prices["cheap"], self.prices["embed"]))
         if self.guards.stage("context"):
             safe: list[ScoredChunk] = []
             for hit in hits:
@@ -236,13 +251,24 @@ class SimpleOrchestrator:
 
         # 3. Weak retrieval -> clarify (or refuse); never invent an answer.
         index = await self.retriever.index() if hasattr(self.retriever, "index") else None
-        verdict = assess(hits, cfg.retrieval, index)
+        calibration = None
+        if index is not None and hasattr(self.retriever, "calibration"):
+            calibration = await self.retriever.calibration(index)
+        scorer = getattr(self.retriever, "scorer", "dense|dense")
+        verdict = assess(
+            hits,
+            cfg.retrieval,
+            calibration,
+            gate=getattr(self.retriever, "gate", None),
+            warn_key=f"{index.name}:{scorer}" if index is not None else None,
+        )
         log.info(
             "retrieval",
             extra={
                 "hits": len(hits),
                 "strong": len(verdict.strong),
                 "weak": verdict.weak,
+                "gate": verdict.gate,
                 "top_score": round(hits[0].score, 4) if hits else None,
             },
         )
@@ -286,7 +312,7 @@ class SimpleOrchestrator:
             return
 
         # 4. Answer from numbered sources.
-        sources = verdict.strong[: cfg.answer.max_context_chunks]
+        sources = verdict.usable[: cfg.answer.max_context_chunks]
         prompt = self.prompts.get(cfg.answer.prompt)
         abstain = str(prompt.output.get("abstain_token", "INSUFFICIENT_CONTEXT"))
         messages = prompt.render(
@@ -316,7 +342,38 @@ class SimpleOrchestrator:
                 yield event
             return
 
-        # 6. Output guards on the complete text, then persist and finish.
+        # 6. Groundedness (optional): every claim must come from the cited sources.
+        if cfg.guardrails.output.groundedness_check and self.judge is not None:
+            gcfg = cfg.guardrails.groundedness
+            cited = {c.marker for c in citations}
+            judged: Judgement = await self.judge.judge(
+                answer, [s for i, s in enumerate(sources, start=1) if i in cited] or sources
+            )
+            usage = usage.add(priced(judged.usage, self.prices[gcfg.model_role]))
+            failed = judged.score < gcfg.min_score and not (
+                judged.error and gcfg.on_error == "allow"
+            )
+            if failed:
+                log.warning(
+                    "answer not grounded",
+                    extra={"score": round(judged.score, 3), "unsupported": len(judged.unsupported)},
+                )
+                if gcfg.on_fail == "warn":
+                    warnings = [*warnings, "groundedness:low"]
+                elif gcfg.on_fail == "refuse":
+                    await self._persist(ctx, question, REFUSAL_TEXT, "refuse")
+                    yield terminal(
+                        self._response(
+                            ctx, REFUSAL_TEXT, "refuse", usage, warnings=[*warnings, "groundedness"]
+                        )
+                    )
+                    return
+                else:
+                    async for event in clarify():
+                        yield event
+                    return
+
+        # 7. Output guards on the complete text, then persist and finish.
         answer, blocked = await self._check_output(answer, messages)
         if blocked:
             await self._persist(ctx, question, answer, "refuse")

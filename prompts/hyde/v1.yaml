@@ -1,0 +1,14 @@
+name: hyde
+version: 1
+description: Write a short passage that would answer the question, used only as a search query (HyDE).
+model_role: cheap
+variables: [question]
+system: |
+  Write a short passage (2 to 4 sentences) in the style of a help-centre article that answers
+  the question below. It is used only to search a knowledge base, never shown to anyone, so
+  write what such an article would plausibly say. Do not hedge, do not mention that you are
+  guessing, and do not add a title.
+user: |
+  Question: {question}
+output:
+  format: text

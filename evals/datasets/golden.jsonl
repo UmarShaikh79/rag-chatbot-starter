@@ -18,3 +18,17 @@
 {"id": "q18", "question": "What is the CEO's name?", "answerable": false, "expected_documents": [], "must_include": []}
 {"id": "q19", "question": "Can I pay with cryptocurrency?", "answerable": false, "expected_documents": [], "must_include": []}
 {"id": "q20", "question": "How do I integrate Tidepool with Jira?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q21", "question": "What does error code E204 mean?", "answerable": true, "expected_documents": ["samples:sync-troubleshooting.md"], "must_include": ["25 MB"], "tags": ["exact-term"]}
+{"id": "q22", "question": "How long is the verification email valid?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["24 hours"]}
+{"id": "q23", "question": "How many tags can one note have?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["50"]}
+{"id": "q24", "question": "Can a public link expire?", "answerable": true, "expected_documents": ["samples:sharing-and-collaboration.md"], "must_include": ["30 days"]}
+{"id": "q25", "question": "Will I lose unsynced changes if I reset the local cache?", "answerable": true, "expected_documents": ["samples:sync-troubleshooting.md"], "must_include": ["lost"]}
+{"id": "q26", "question": "How deeply can notebooks be nested?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["three levels"]}
+{"id": "q27", "question": "Which role lets someone comment without editing?", "answerable": true, "expected_documents": ["samples:sharing-and-collaboration.md"], "must_include": ["Commenter"]}
+{"id": "q28", "question": "Which app versions can no longer sync?", "answerable": true, "expected_documents": ["samples:sync-troubleshooting.md"], "must_include": ["3.0"], "tags": ["exact-term"]}
+{"id": "q29", "question": "Is there a student discount?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q30", "question": "Can I run Tidepool on my own servers on premises?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q31", "question": "What is the phone number for customer support?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q32", "question": "Can I import notes from Evernote?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q33", "question": "Does the app have a dark mode?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q34", "question": "Which programming language is Tidepool written in?", "answerable": false, "expected_documents": [], "must_include": []}

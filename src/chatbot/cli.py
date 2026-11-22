@@ -9,6 +9,7 @@ import signal
 import sys
 from typing import Any
 
+from chatbot.core.errors import ChatbotError
 from chatbot.core.settings import ConfigError, get_settings, load_settings
 
 
@@ -137,6 +138,105 @@ def cmd_ask(args: argparse.Namespace) -> None:
     asyncio.run(_ask(args))
 
 
+async def _eval_components():
+    """Like _components, but conversations and memory jobs stay in memory: an eval run
+    leaves nothing behind in the database except what you ask it to store."""
+    from chatbot.core import container
+    from chatbot.db import make_pool
+    from chatbot.testing.fakes import InMemoryJobQueue, InMemoryMemoryStore
+
+    settings = get_settings()
+    pool = make_pool(settings)
+    await pool.open(wait=True, timeout=30)
+    return container.build(settings, pool, memory=InMemoryMemoryStore(), queue=InMemoryJobQueue())
+
+
+def _profile() -> str:
+    import os
+
+    return os.environ.get("CHATBOT_PROFILE") or "dev"
+
+
+async def _eval(args: argparse.Namespace):
+    from chatbot.evals.commands import evaluate
+
+    c = await _eval_components()
+    try:
+        return await evaluate(c, args.dataset, args.retrieval_only), c.settings
+    finally:
+        await c.close()
+
+
+def cmd_eval(args: argparse.Namespace) -> None:
+    import os
+    from pathlib import Path
+
+    from chatbot.evals import gate as gates
+
+    report, settings = asyncio.run(_eval(args))
+    root, evals = settings.root_dir, settings.evals
+    profile = _profile()
+    baseline_path = root / evals.baselines_dir / f"{profile}.json"
+    result = None
+    if args.gate:
+        rules = gates.load_rules(root / evals.gate, profile)
+        result = gates.check(report.summary, rules, gates.load_baseline(baseline_path))
+    print(json.dumps({"summary": report.summary, "meta": report.meta}, indent=2))
+    if args.out:
+        Path(args.out).write_text(report.model_dump_json(indent=2))
+        print(f"full report: {args.out}", file=sys.stderr)
+    if args.update_baseline:
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        baseline_path.write_text(
+            json.dumps({"summary": report.summary, "meta": report.meta}, indent=2) + "\n"
+        )
+        print(f"baseline written: {baseline_path}", file=sys.stderr)
+    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        with open(step_summary, "a") as fh:
+            fh.write(gates.markdown(report.summary, result, f"Evals ({profile} profile)"))
+    if result is not None:
+        if not result.passed:
+            print("eval gate FAILED:\n  " + "\n  ".join(result.failures), file=sys.stderr)
+            sys.exit(1)
+        print("eval gate passed", file=sys.stderr)
+
+
+async def _calibrate(args: argparse.Namespace) -> int:
+    from chatbot.evals.commands import calibrate
+
+    c = await _eval_components()
+    try:
+        result, calibration = await calibrate(c, args.dataset, apply=args.apply)
+    finally:
+        await c.close()
+    print(
+        json.dumps(
+            {
+                "scorer": calibration.scorer,
+                "min_score": calibration.min_score,
+                "min_hits": calibration.min_hits,
+                "answer_recall": result.best.answer_recall,
+                "abstention": result.best.abstention,
+                "met_target": result.met_target,
+                "dataset": calibration.dataset,
+                "frontier": [p.model_dump() for p in result.frontier],
+                "stored": args.apply,
+            },
+            indent=2,
+        )
+    )
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if not args.apply:
+        print("dry run: add --apply to store these thresholds with the index", file=sys.stderr)
+    return 1 if args.check and not result.met_target else 0
+
+
+def cmd_calibrate(args: argparse.Namespace) -> None:
+    sys.exit(asyncio.run(_calibrate(args)))
+
+
 def cmd_hash_key(args: argparse.Namespace) -> None:
     from chatbot.auth.api_key import hash_key, new_key
 
@@ -202,6 +302,26 @@ def main(argv: list[str] | None = None) -> None:
     ask.add_argument("--stream", action="store_true")
     ask.set_defaults(func=cmd_ask)
 
+    ev = sub.add_parser("eval", help="run the golden dataset and score retrieval and answers")
+    ev.add_argument("--dataset", help="JSONL file (default: evals.dataset)")
+    ev.add_argument("--retrieval-only", action="store_true", help="skip answer generation")
+    ev.add_argument("--gate", action="store_true", help="exit 1 below evals/gate.yaml floors")
+    ev.add_argument("--out", help="write the full per-question report (JSON) here")
+    ev.add_argument(
+        "--update-baseline", action="store_true", help="save this run as the profile's baseline"
+    )
+    ev.set_defaults(func=cmd_eval)
+
+    cal = sub.add_parser(
+        "calibrate", help="sweep min_score and min_hits on the golden set (ADR 011)"
+    )
+    cal.add_argument("--dataset", help="JSONL file (default: evals.dataset)")
+    cal.add_argument("--apply", action="store_true", help="store the result with the index")
+    cal.add_argument(
+        "--check", action="store_true", help="exit 1 when the answer-recall target is missed"
+    )
+    cal.set_defaults(func=cmd_calibrate)
+
     hk = sub.add_parser("hash-key", help="create an API key, or hash an existing one")
     hk.add_argument("key", nargs="?")
     hk.set_defaults(func=cmd_hash_key)
@@ -221,6 +341,9 @@ def main(argv: list[str] | None = None) -> None:
         args.func(args)
     except ConfigError as exc:
         print(exc, file=sys.stderr)
+        sys.exit(2)
+    except ChatbotError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
 
 

@@ -43,6 +43,7 @@ vector_store:
     iterative_scan: relaxed_order   # off | strict_order | relaxed_order
     max_scan_tuples: 20000
   exact_scan_threshold: 2000        # filters matching <= this many chunks skip HNSW and scan exactly
+  text_search_config: english       # Postgres text search config for BM25; fixed per index (ADR 020)
 
 ingestion:
   sources:
@@ -63,9 +64,33 @@ ingestion:
     lock_timeout_s: 600             # a job locked longer than this is considered abandoned
 
 retrieval:
-  strategy: dense                   # dense (M1); bm25 | hybrid come in M3
+  strategy: dense                   # dense | bm25 | hybrid (ADR 019)
   top_k: 8
-  min_score: 0.35                   # provisional; calibrated per embedding model in M3 (ADR 011)
+  bm25:                             # Okapi BM25 in Postgres, no extension (ADR 020)
+    k1: 1.2
+    b: 0.75
+  hybrid:                           # used when strategy: hybrid
+    retrievers: [dense, bm25]
+    candidates: 20                  # hits per retriever before fusion
+    rrf_k: 60                       # reciprocal rank fusion constant
+    weights: {}                     # e.g. {dense: 1.0, bm25: 0.5}
+  hyde:                             # embed a hypothetical answer (one cheap-model call)
+    enabled: false
+    prompt: hyde/v1
+    model_role: cheap
+    apply_to: [dense]
+    include_query: true
+  query_rewrite:                    # make follow-ups standalone before retrieval
+    enabled: false
+    prompt: rewrite_query/v1
+    model_role: cheap
+    only_with_history: true
+  rerank:
+    enabled: false
+    model: cohere:rerank       # a name under rerankers in config/models.yaml
+    candidates: 20                  # retrieved hits handed to the reranker; top_k are kept
+  gate: auto                        # score min_score applies to: auto | dense | bm25 | rerank
+  min_score: 0.35                   # provisional until `chatbot calibrate` (ADR 011, ADR 021)
   min_hits: 1                       # always paired with min_score
   thresholds_from: index            # index | config; calibrated values stored with the index win
 
@@ -104,6 +129,7 @@ guardrails:
   output:                           # runs on the complete answer, in streaming mode too
     pii_redaction: true
     prompt_leak_check: true         # refuse answers that repeat the system prompt verbatim
+    groundedness_check: false       # judge every answer against its sources (one more call)
   pii:
     detectors: [regex]              # regex | presidio (names, places; `uv sync --extra presidio`)
     allow: []                       # strings never redacted, e.g. your public support email
@@ -118,7 +144,26 @@ guardrails:
       prompt: guard_injection/v1
       stages: [input]               # input | context; one model call per checked text
       on_error: allow               # allow | block when the classifier call fails
+  groundedness:                     # the output check above and the eval faithfulness metric
+    judge: llm                      # llm | lexical (word overlap, offline)
+    model_role: cheap
+    prompt: judge_groundedness/v1
+    min_score: 0.7                  # share of the answer's claims the sources support
+    on_fail: clarify                # clarify | refuse | warn
+    on_error: allow                 # allow | block when the judge call fails
   stream_holdback_chars: 64         # rolling buffer so PII is never split across SSE events
+
+evals:                              # `chatbot eval` and `chatbot calibrate` (ADR 010, ADR 021)
+  dataset: evals/datasets/golden.jsonl
+  gate: evals/gate.yaml             # floors and allowed regression, checked with --gate
+  baselines_dir: evals/baselines
+  hit_at: [1, 3]                    # hit@k reported besides hit@top_k
+  faithfulness_judge: llm           # llm | lexical | off
+  concurrency: 4
+  calibration:
+    target_answer_recall: 0.9       # keep at least this share of answerable questions
+    max_min_hits: 3                 # min_hits values tried: 1..3
+    min_unanswerable: 5             # warn when the dataset has fewer unanswerable questions
 
 observability:
   log_level: INFO

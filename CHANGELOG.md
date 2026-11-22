@@ -3,6 +3,37 @@
 This is a template you copy and own (ADR 001). Each entry lists what changed and, when it
 matters, how to bring the change into a copy you have already modified.
 
+## 0.3.0: milestone 3
+
+Retrieval quality and evals.
+
+- Retrieval pipeline built from config (`retrieval.*`, ADR 019): `dense`, `bm25` (Okapi BM25
+  in Postgres over a `tsvector` column, no extension, ADR 020) and `hybrid` (reciprocal rank
+  fusion with optional weights); HyDE (`hyde/v1`) for chosen retrievers; query rewriting of
+  follow-ups (`rewrite_query/v1`) used only for retrieval; rerank with Cohere (HTTP, no SDK),
+  a local cross-encoder (`uv sync --extra rerank`) or a word-overlap reranker for tests.
+- Every hit keeps its per-step scores (`ScoredChunk.scores`); weak-retrieval thresholds apply to
+  a gate score (`retrieval.gate`), never to a fused rank.
+- Calibration per index and scorer (ADR 021): `chatbot calibrate [--apply] [--check]` sweeps
+  `min_score` with `min_hits` on the golden set; `GET /v1/sources` shows the active scorer and
+  its thresholds.
+- Evals (ADR 022): `chatbot eval` with hit@k, recall, MRR, answer rate, required phrases,
+  citation precision, faithfulness and abstention; `--gate` against `evals/gate.yaml` and a
+  committed baseline; CI `evals` job (offline) and a nightly `evals-live` workflow.
+- Optional groundedness check on answers (`guardrails.output.groundedness_check`,
+  `judge_groundedness/v1` or a lexical judge) with clarify, refuse or warn on failure.
+- Golden set grows to 34 questions (10 unanswerable). Cohere reranker profile defaults to
+  `rerank-v5.0-fast`.
+- ADRs 019-022.
+
+Upgrading a copy of 0.2.0: run `chatbot migrate` (adds `chunks.tsv`, `chunks.doc_len`,
+`vector_indexes.text_config` and `retrieval_calibrations`, backfills existing chunks and moves
+old thresholds to scorer `dense|dense`). `IndexInfo` lost `min_score`/`min_hits` (use
+`get_calibration`). Custom retriever factories are now called with a `settings=` keyword:
+add `**kwargs`. A custom vector store needs `keyword_search` for BM25 and
+`get_calibration`/`save_calibration` for stored thresholds; without them those features are
+unavailable and config thresholds apply.
+
 ## 0.2.0: milestone 2
 
 Safety and memory.

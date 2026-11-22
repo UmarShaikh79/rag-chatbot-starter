@@ -3,7 +3,7 @@ API ?= http://localhost:8000
 Q ?= How long is the refund window for annual plans?
 TEST_DATABASE_URL ?= postgresql://chatbot:chatbot@localhost:5432/chatbot_test
 
-.PHONY: help install up down logs migrate ingest ask ask-stream api-key test test-unit test-db lint format check-config
+.PHONY: help install up down logs migrate ingest ask ask-stream api-key test test-unit test-db lint format check-config eval eval-retrieval calibrate calibrate-apply
 
 help:          ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -54,6 +54,18 @@ lint:          ## ruff lint and format check
 format:        ## apply ruff fixes and formatting
 	uv run ruff check --fix .
 	uv run ruff format .
+
+eval:          ## run the golden set and check evals/gate.yaml (needs an ingested index)
+	uv run chatbot eval --gate --out eval-report.json
+
+eval-retrieval: ## retrieval metrics only (no answer generation, no LLM cost)
+	uv run chatbot eval --retrieval-only
+
+calibrate:     ## sweep min_score + min_hits on the golden set (dry run)
+	uv run chatbot calibrate
+
+calibrate-apply: ## same, and store the thresholds with the index (ADR 011)
+	uv run chatbot calibrate --apply
 
 check-config:  ## print the merged configuration
 	uv run chatbot check-config

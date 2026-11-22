@@ -7,11 +7,16 @@ models:
 vector_store:
   index: docs_offline
 retrieval:
-  # Hashing-embedder cosine scores sit on a different scale from OpenAI's (ADR 011).
-  # On the golden set, answerable questions' top hit scored 0.10 to 0.46, so 0.08 lets them
-  # through. Lexical scores cannot separate unanswerable questions that share words with the
-  # corpus; with a real model the answer prompt's INSUFFICIENT_CONTEXT path catches those.
+  # Hashing-embedder cosine scores sit on a different scale from OpenAI's (ADR 011). These are
+  # provisional; `chatbot calibrate` replaces them per index and pipeline. Lexical scores
+  # cannot separate unanswerable questions that share words with the corpus; with a real
+  # model the answer prompt's INSUFFICIENT_CONTEXT path catches those.
   min_score: 0.08
   min_hits: 1
+guardrails:
+  groundedness:
+    judge: lexical                  # the fake LLM is not a judge
+evals:
+  faithfulness_judge: lexical
 observability:
   log_format: text

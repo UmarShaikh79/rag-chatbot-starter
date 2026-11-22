@@ -110,6 +110,9 @@ class VectorStoreSection(Strict):
     distance: Literal["cosine"] = "cosine"
     hnsw: HnswSection = HnswSection()
     exact_scan_threshold: int = 2000
+    # Postgres text search config for BM25 (english, simple, german, ...). Recorded with an
+    # index when it is created; changing it needs a new index (re-ingest), like the embedder.
+    text_search_config: str = Field("english", pattern=r"^[a-z_]{1,40}$")
 
 
 class SourceConfig(Strict):
@@ -147,12 +150,93 @@ class IngestionSection(Strict):
     worker: WorkerSection = WorkerSection()
 
 
+class Bm25Options(Strict):
+    k1: float = Field(1.2, ge=0.0, le=3.0)  # term-frequency saturation
+    b: float = Field(0.75, ge=0.0, le=1.0)  # length normalisation
+
+
+class HybridOptions(Strict):
+    """Run several retrievers and fuse their rankings with reciprocal rank fusion (ADR 019)."""
+
+    retrievers: list[str] = Field(["dense", "bm25"], min_length=2)
+    candidates: int = Field(20, ge=1, le=200)  # hits each retriever returns before fusion
+    rrf_k: int = Field(60, ge=1)
+    weights: dict[str, float] = {}  # per retriever, default 1.0
+
+    @model_validator(mode="after")
+    def _distinct(self) -> HybridOptions:
+        if len(set(self.retrievers)) != len(self.retrievers):
+            raise ValueError("hybrid.retrievers must not repeat a retriever")
+        unknown = set(self.weights) - set(self.retrievers)
+        if unknown:
+            raise ValueError(f"hybrid.weights names retrievers not in the list: {sorted(unknown)}")
+        return self
+
+
+class HydeOptions(Strict):
+    """Embed a hypothetical answer instead of the bare question (one cheap-model call)."""
+
+    enabled: bool = False
+    prompt: str = "hyde/v1"
+    model_role: Literal["answer", "cheap"] = "cheap"
+    apply_to: list[str] = ["dense"]  # which retrievers get the hypothetical text
+    include_query: bool = True  # embed "question + hypothetical answer", not the answer alone
+
+
+class QueryRewriteOptions(Strict):
+    """Rewrite a follow-up ("and in the US?") into a standalone search query."""
+
+    enabled: bool = False
+    prompt: str = "rewrite_query/v1"
+    model_role: Literal["answer", "cheap"] = "cheap"
+    only_with_history: bool = True  # skip the call on a conversation's first message
+    max_chars: int = Field(400, ge=20)  # longer rewrites are ignored (the original is used)
+
+
+class RerankOptions(Strict):
+    enabled: bool = False
+    model: str = "cohere:rerank"  # a name under rerankers in config/models.yaml
+    candidates: int = Field(20, ge=1, le=200)  # retrieved hits handed to the reranker
+
+
 class RetrievalSection(Strict):
-    strategy: str = "dense"
+    strategy: str = "dense"  # dense | bm25 | hybrid | any retriever you register
     top_k: int = Field(8, ge=1, le=100)
-    min_score: float = 0.35
+    bm25: Bm25Options = Bm25Options()
+    hybrid: HybridOptions = HybridOptions()
+    hyde: HydeOptions = HydeOptions()
+    query_rewrite: QueryRewriteOptions = QueryRewriteOptions()
+    rerank: RerankOptions = RerankOptions()
+    # Which score min_score applies to. auto: rerank when reranking, else dense when a dense
+    # retriever runs, else bm25. Never a fused RRF score: ranks say nothing about relevance.
+    gate: Literal["auto", "dense", "bm25", "rerank"] = "auto"
+    min_score: float = 0.35  # provisional until calibrated (ADR 011)
     min_hits: int = Field(1, ge=1)
     thresholds_from: Literal["index", "config"] = "index"
+
+    def retriever_names(self) -> list[str]:
+        return list(self.hybrid.retrievers) if self.strategy == "hybrid" else [self.strategy]
+
+    def gate_signal(self) -> str:
+        if self.gate != "auto":
+            return self.gate
+        if self.rerank.enabled:
+            return "rerank"
+        names = self.retriever_names()
+        return "dense" if "dense" in names or len(names) > 1 else names[0]
+
+    @model_validator(mode="after")
+    def _consistent(self) -> RetrievalSection:
+        names = self.retriever_names()
+        if self.gate == "rerank" and not self.rerank.enabled:
+            raise ValueError("retrieval.gate is rerank but retrieval.rerank.enabled is false")
+        if self.gate in ("dense", "bm25") and self.gate not in names:
+            raise ValueError(f"retrieval.gate {self.gate} is not one of the retrievers {names}")
+        if self.hyde.enabled and not set(self.hyde.apply_to) & set(names):
+            raise ValueError(
+                f"retrieval.hyde.apply_to {self.hyde.apply_to} matches none of {names}"
+            )
+        return self
 
 
 class AnswerSection(Strict):
@@ -207,6 +291,18 @@ class ContextGuards(Strict):
 class OutputGuards(Strict):
     pii_redaction: bool = True
     prompt_leak_check: bool = True  # refuse answers that repeat the system prompt verbatim
+    groundedness_check: bool = False  # judge the answer against its sources (one more call)
+
+
+class GroundednessOptions(Strict):
+    """How answers are judged against their sources: the output check and the eval metric."""
+
+    judge: Literal["llm", "lexical"] = "llm"  # lexical: word overlap, offline and free
+    model_role: Literal["answer", "cheap"] = "cheap"
+    prompt: str = "judge_groundedness/v1"
+    min_score: float = Field(0.7, ge=0.0, le=1.0)  # share of supported claims
+    on_fail: Literal["clarify", "refuse", "warn"] = "clarify"
+    on_error: Literal["allow", "block"] = "allow"  # if the judge call fails
 
 
 class PresidioOptions(Strict):
@@ -252,7 +348,26 @@ class GuardrailsSection(Strict):
     output: OutputGuards = OutputGuards()
     pii: PiiSection = PiiSection()
     injection: InjectionSection = InjectionSection()
+    groundedness: GroundednessOptions = GroundednessOptions()
     stream_holdback_chars: int = Field(64, ge=16)
+
+
+class CalibrationOptions(Strict):
+    """How ``chatbot calibrate`` picks min_score and min_hits (ADR 011, ADR 021)."""
+
+    target_answer_recall: float = Field(0.9, ge=0.0, le=1.0)  # answerable questions kept
+    max_min_hits: int = Field(3, ge=1, le=10)  # min_hits values tried: 1..this
+    min_unanswerable: int = Field(5, ge=1)  # fewer unanswerable questions -> warning
+
+
+class EvalsSection(Strict):
+    dataset: str = "evals/datasets/golden.jsonl"
+    gate: str = "evals/gate.yaml"
+    baselines_dir: str = "evals/baselines"
+    hit_at: list[int] = [1, 3]  # hit@k reported besides hit@top_k
+    faithfulness_judge: Literal["llm", "lexical", "off"] = "llm"
+    concurrency: int = Field(4, ge=1, le=32)
+    calibration: CalibrationOptions = CalibrationOptions()
 
 
 class ObservabilitySection(Strict):
@@ -282,9 +397,18 @@ class EmbeddingProfile(Strict):
     price_per_mtok: dict[str, float | None] = {}
 
 
+class RerankerProfile(Strict):
+    provider: str  # cohere | cross_encoder | lexical | your own
+    model: str
+    api_key_env: str | None = None
+    base_url: str | None = None
+    params: dict[str, Any] = {}
+
+
 class ModelCatalog(Strict):
     llm: dict[str, LLMProfile] = {}
     embeddings: dict[str, EmbeddingProfile] = {}
+    rerankers: dict[str, RerankerProfile] = {}
 
 
 # ---------------------------------------------------------------- root
@@ -301,6 +425,7 @@ class Settings(Strict):
     answer: AnswerSection = AnswerSection()
     memory: MemorySection = MemorySection()
     guardrails: GuardrailsSection = GuardrailsSection()
+    evals: EvalsSection = EvalsSection()
     observability: ObservabilitySection = ObservabilitySection()
     orchestrator: str = "simple"
     catalog: ModelCatalog = ModelCatalog()
@@ -318,6 +443,12 @@ class Settings(Strict):
                 f"models.embed: '{self.models.embed}' is not defined under embeddings "
                 "in models.yaml"
             )
+        rerank = self.retrieval.rerank
+        if rerank.enabled and rerank.model not in self.catalog.rerankers:
+            raise ValueError(
+                f"retrieval.rerank.model: '{rerank.model}' is not defined under rerankers "
+                "in models.yaml"
+            )
         names = [s.name for s in self.ingestion.sources]
         if len(names) != len(set(names)):
             raise ValueError("ingestion.sources: source names must be unique")
@@ -328,6 +459,9 @@ class Settings(Strict):
 
     def embed_profile(self) -> EmbeddingProfile:
         return self.catalog.embeddings[self.models.embed]
+
+    def reranker_profile(self) -> RerankerProfile:
+        return self.catalog.rerankers[self.retrieval.rerank.model]
 
     def source(self, name: str) -> SourceConfig:
         for s in self.ingestion.sources:

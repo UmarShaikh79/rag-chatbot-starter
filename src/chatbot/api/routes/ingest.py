@@ -81,18 +81,25 @@ async def list_sources(c: Components = Depends(components)) -> dict[str, Any]:
         for s in c.settings.ingestion.sources
     ]
     inline = [{"name": name, "type": "inline", **_counts(row)} for name, row in stats.items()]
-    return {
-        "index": None
-        if index is None
-        else {
+    info = None
+    if index is not None:
+        calibration = None
+        if hasattr(c.retriever, "calibration"):
+            calibration = await c.retriever.calibration(index)
+        info = {
             "alias": index.alias,
             "name": index.name,
             "embedding_model": index.embedding_model,
             "dims": index.dims,
-            "calibrated": index.min_score is not None,
-        },
-        "sources": configured + inline,
-    }
+            "scorer": getattr(c.retriever, "scorer", None),
+            "calibrated": calibration is not None,
+            "calibration": None
+            if calibration is None
+            else calibration.model_dump(
+                mode="json", include={"min_score", "min_hits", "calibrated_at"}
+            ),
+        }
+    return {"index": info, "sources": configured + inline}
 
 
 def _counts(row: dict[str, Any] | None) -> dict[str, Any]:

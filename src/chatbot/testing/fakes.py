@@ -13,6 +13,7 @@ from typing import Any
 
 from chatbot.core.errors import ForbiddenError, IndexMismatchError
 from chatbot.core.types import (
+    Calibration,
     Chunk,
     ConversationContext,
     DeletionReport,
@@ -38,6 +39,7 @@ class InMemoryVectorStore:
         self.indexes: dict[str, IndexInfo] = {}
         self.documents: dict[tuple[int, str], dict[str, Any]] = {}
         self.chunks: dict[tuple[int, str], list[tuple[Chunk, list[float]]]] = {}
+        self.calibrations: dict[tuple[int, str], Calibration] = {}
 
     async def get_index(self, alias: str) -> IndexInfo | None:
         return self.indexes.get(alias)
@@ -114,9 +116,59 @@ class InMemoryVectorStore:
                 meta = {k2: v for k2, v in filters.items() if k2 != "document_id"}
                 if any(chunk.metadata.get(k2) != v for k2, v in meta.items()):
                     continue
-                hits.append(ScoredChunk(chunk=chunk, score=cosine(vector, vec), retriever="dense"))
+                score = cosine(vector, vec)
+                hits.append(
+                    ScoredChunk(
+                        chunk=chunk, score=score, retriever="dense", scores={"dense": score}
+                    )
+                )
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:k]
+
+    def _filtered(self, index: IndexInfo, filters: dict[str, Any]) -> list[Chunk]:
+        out = []
+        for (i, doc_id), items in self.chunks.items():
+            if i != index.id:
+                continue
+            wanted = filters.get("document_id")
+            if wanted is not None and doc_id not in (
+                wanted if isinstance(wanted, list) else [wanted]
+            ):
+                continue
+            meta = {k2: v for k2, v in filters.items() if k2 != "document_id"}
+            out.extend(
+                c for c, _ in items if all(c.metadata.get(k2) == v for k2, v in meta.items())
+            )
+        return out
+
+    async def keyword_search(
+        self, index: IndexInfo, query: str, k: int, filters: dict[str, Any]
+    ) -> list[ScoredChunk]:
+        from chatbot.retrieval.bm25 import bm25_rank
+
+        # Statistics over the whole index, like the SQL version; filters only pick results.
+        corpus = [c for items in self._index_items(index) for c in items]
+        allowed = {c.id for c in self._filtered(index, filters)}
+        ranked = bm25_rank(query, [c.text for c in corpus])
+        return [
+            ScoredChunk(chunk=corpus[i], score=s, retriever="bm25", scores={"bm25": s})
+            for i, s in ranked
+            if corpus[i].id in allowed
+        ][:k]
+
+    def _index_items(self, index: IndexInfo) -> list[list[Chunk]]:
+        return [[c for c, _ in items] for (i, _), items in self.chunks.items() if i == index.id]
+
+    async def get_calibration(self, index: IndexInfo, scorer: str) -> Calibration | None:
+        return self.calibrations.get((index.id, scorer))
+
+    async def save_calibration(self, index: IndexInfo, calibration: Calibration) -> None:
+        self.calibrations[(index.id, calibration.scorer)] = calibration.model_copy(
+            update={"calibrated_at": datetime.now(UTC)}
+        )
+
+    async def list_calibrations(self, index: IndexInfo) -> list[Calibration]:
+        return [c for (i, _), c in sorted(self.calibrations.items()) if i == index.id]
 
 
 class InMemoryMemoryStore:

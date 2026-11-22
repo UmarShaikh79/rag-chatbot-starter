@@ -1,0 +1,47 @@
+# Floors `chatbot eval --gate` enforces, per CHATBOT_PROFILE (ADR 010, ADR 022).
+# Metric names are the keys of the report summary. A metric the run did not produce
+# (answer metrics under --retrieval-only) is skipped, not failed.
+#
+# max_drop: a metric listed under `min` also fails when it falls more than this below the
+# committed baseline (evals/baselines/<profile>.json). Refresh the baseline on purpose:
+#   chatbot eval --update-baseline
+
+profiles:
+  # CI: hashing embedder + extractive fake LLM, calibrated on the golden set first.
+  # Lexical embeddings can't tell most unanswerable questions apart, hence the low
+  # abstention floor; it guards against regressions, not for absolute quality.
+  offline:
+    min:
+      retrieval.hit@3: 0.95
+      retrieval.mrr: 0.85
+      answer.answer_rate: 0.8
+      answer.must_include_rate: 0.5
+      answer.citation_precision: 0.9
+      answer.faithfulness: 0.9
+      abstention.unanswerable_rate: 0.2
+    max:
+      errors: 0
+    max_drop: 0.05
+
+  # Hosted models (OpenAI). Starting floors, not measured yet: run `chatbot eval` once
+  # with your key, then tighten these and commit a baseline.
+  dev:
+    min:
+      retrieval.hit@3: 0.9
+      answer.answer_rate: 0.85
+      answer.must_include_rate: 0.8
+      answer.faithfulness: 0.9
+      abstention.unanswerable_rate: 0.8
+    max:
+      errors: 0
+    max_drop: 0.05
+  prod:
+    min:
+      retrieval.hit@3: 0.9
+      answer.answer_rate: 0.85
+      answer.must_include_rate: 0.8
+      answer.faithfulness: 0.9
+      abstention.unanswerable_rate: 0.8
+    max:
+      errors: 0
+    max_drop: 0.05

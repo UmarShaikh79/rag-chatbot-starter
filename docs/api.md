@@ -12,7 +12,7 @@ an API key or the admin scope. Interactive docs are served at `/docs`.
 | POST | `/v1/chat` | Ask a question (JSON, or SSE with `stream: true` / `Accept: text/event-stream`) |
 | POST | `/v1/ingest` | Queue a sync of a configured source, or ingest inline documents |
 | GET | `/v1/jobs/{id}` | Job status and result report |
-| GET | `/v1/sources` | Configured sources, inline sources, document and chunk counts, index info |
+| GET | `/v1/sources` | Configured sources, inline sources, document and chunk counts, index info (embedding model, active retrieval scorer, calibrated thresholds) |
 | DELETE | `/v1/documents/{document_id}` | Remove one document and its chunks |
 | GET | `/v1/users/{user_id}/memory` | Long-term facts remembered about the user, most recent first |
 | DELETE | `/v1/users/{user_id}/memory/facts/{fact_id}` | Forget one fact (204) |

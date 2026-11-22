@@ -1,6 +1,6 @@
 [project]
 name = "rag-chatbot-starter"
-version = "0.2.0"
+version = "0.3.0"
 description = "Clone-and-own boilerplate for a config-driven RAG chatbot backend (FastAPI, Postgres, pgvector)."
 readme = "README.md"
 license = "MIT"
@@ -26,7 +26,11 @@ dependencies = [
 presidio = [
     "presidio-analyzer>=2.2",
 ]
-# Later milestones add extras here: ollama, langgraph, qdrant, bm25, rerank, langfuse, otel, graphql.
+# Local cross-encoder reranker (retrieval.rerank with a cross_encoder profile). Pulls in torch.
+rerank = [
+    "sentence-transformers>=3.0",
+]
+# Later milestones add extras here: ollama, langgraph, qdrant, langfuse, otel, graphql.
 
 [project.scripts]
 chatbot = "chatbot.cli:main"

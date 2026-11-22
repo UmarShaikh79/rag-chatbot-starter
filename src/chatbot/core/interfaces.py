@@ -8,6 +8,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from chatbot.core.types import (
+    Calibration,
     Chunk,
     Completion,
     ConversationContext,
@@ -79,6 +80,24 @@ class VectorStore(Protocol):
 
 
 @runtime_checkable
+class KeywordSearch(Protocol):
+    """Optional store capability: lexical (BM25) search over the same chunks (ADR 020)."""
+
+    async def keyword_search(
+        self, index: IndexInfo, query: str, k: int, filters: dict[str, Any]
+    ) -> list[ScoredChunk]: ...
+
+
+@runtime_checkable
+class CalibrationStore(Protocol):
+    """Optional store capability: calibrated thresholds per index and scorer (ADR 021)."""
+
+    async def get_calibration(self, index: IndexInfo, scorer: str) -> Calibration | None: ...
+
+    async def save_calibration(self, index: IndexInfo, calibration: Calibration) -> None: ...
+
+
+@runtime_checkable
 class Source(Protocol):
     name: str
 
@@ -105,6 +124,18 @@ class Retriever(Protocol):
 
     async def retrieve(
         self, query: str, k: int, filters: dict[str, Any]
+    ) -> tuple[list[ScoredChunk], Usage]: ...
+
+
+@runtime_checkable
+class Reranker(Protocol):
+    """Re-scores retrieved hits against the query. ``signature`` names the model, because a
+    reranker's scores live on their own scale and need their own calibration (ADR 011)."""
+
+    signature: str
+
+    async def rerank(
+        self, query: str, hits: list[ScoredChunk], top_n: int
     ) -> tuple[list[ScoredChunk], Usage]: ...
 
 
