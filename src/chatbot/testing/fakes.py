@@ -18,9 +18,11 @@ from chatbot.core.types import (
     DeletionReport,
     IndexInfo,
     Job,
+    MemoryState,
     ParsedDocument,
     ScoredChunk,
     Turn,
+    UserFact,
 )
 
 
@@ -121,23 +123,103 @@ class InMemoryMemoryStore:
     def __init__(self) -> None:
         self.conversations: dict[str, str | None] = {}
         self.turns: list[tuple[str, str | None, Turn]] = []
+        self.summaries: dict[str, MemoryState] = {}
+        self.facts: dict[str, list[UserFact]] = {}
+        self._turn_id = 0
+        self._fact_id = 0
 
     async def load(
-        self, user_id: str | None, conversation_id: str | None, history_turns: int
+        self,
+        user_id: str | None,
+        conversation_id: str | None,
+        history_turns: int,
+        facts_limit: int = 0,
     ) -> ConversationContext:
+        facts = await self.list_facts(user_id, facts_limit) if user_id and facts_limit else []
         if conversation_id is None or conversation_id not in self.conversations:
             return ConversationContext(
-                conversation_id=conversation_id or uuid.uuid4().hex, user_id=user_id, is_new=True
+                conversation_id=conversation_id or uuid.uuid4().hex,
+                user_id=user_id,
+                facts=facts,
+                is_new=True,
             )
         owner = self.conversations[conversation_id]
         if owner is not None and owner != user_id:
             raise ForbiddenError("This conversation belongs to a different user")
-        history = [t for cid, _, t in self.turns if cid == conversation_id][-history_turns:]
-        return ConversationContext(conversation_id=conversation_id, user_id=owner, history=history)
+        history = [t for cid, _, t in self.turns if cid == conversation_id]
+        history = history[-history_turns:] if history_turns else []
+        state = self.summaries.get(conversation_id)
+        return ConversationContext(
+            conversation_id=conversation_id,
+            user_id=owner,
+            history=history,
+            summary=state.summary if state else "",
+            facts=facts,
+        )
 
     async def save_turns(self, ctx: ConversationContext, turns: list[Turn]) -> None:
         self.conversations.setdefault(ctx.conversation_id, ctx.user_id)
-        self.turns.extend((ctx.conversation_id, ctx.user_id, t) for t in turns)
+        for t in turns:
+            self._turn_id += 1
+            stored = t.model_copy(update={"id": self._turn_id, "created_at": datetime.now(UTC)})
+            self.turns.append((ctx.conversation_id, ctx.user_id, stored))
+
+    async def memory_state(self, conversation_id: str) -> MemoryState | None:
+        if conversation_id not in self.conversations:
+            return None
+        state = self.summaries.get(conversation_id)
+        if state is None:
+            state = MemoryState(
+                conversation_id=conversation_id, user_id=self.conversations[conversation_id]
+            )
+        return state.model_copy()
+
+    async def turns_after(self, conversation_id: str, after_id: int) -> list[Turn]:
+        return [t for cid, _, t in self.turns if cid == conversation_id and (t.id or 0) > after_id]
+
+    async def save_summary(self, state: MemoryState) -> None:
+        if state.conversation_id in self.conversations:
+            self.summaries[state.conversation_id] = state.model_copy()
+
+    async def add_facts(
+        self, user_id: str, facts: list[str], conversation_id: str | None, max_facts: int
+    ) -> int:
+        from chatbot.memory.facts import fact_key
+
+        stored = self.facts.setdefault(user_id, [])
+        added = 0
+        for fact in facts:
+            now = datetime.now(UTC)
+            existing = next((f for f in stored if fact_key(f.fact) == fact_key(fact)), None)
+            if existing is not None:
+                existing.updated_at = now
+                stored.remove(existing)
+                stored.append(existing)
+                continue
+            self._fact_id += 1
+            stored.append(
+                UserFact(
+                    id=self._fact_id,
+                    fact=fact,
+                    source_conversation_id=conversation_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            added += 1
+        del stored[: max(len(stored) - max_facts, 0)]
+        return added
+
+    async def list_facts(self, user_id: str, limit: int = 100) -> list[UserFact]:
+        return list(reversed(self.facts.get(user_id, [])))[:limit]
+
+    async def delete_fact(self, user_id: str, fact_id: int) -> bool:
+        stored = self.facts.get(user_id, [])
+        for f in stored:
+            if f.id == fact_id:
+                stored.remove(f)
+                return True
+        return False
 
     async def forget_user(self, user_id: str) -> DeletionReport:
         before = len(self.turns)
@@ -145,9 +227,18 @@ class InMemoryMemoryStore:
         convs = [c for c, u in self.conversations.items() if u == user_id]
         for c in convs:
             del self.conversations[c]
+        summaries = [c for c, s in self.summaries.items() if s.user_id == user_id or c in convs]
+        for c in summaries:
+            del self.summaries[c]
+        facts = len(self.facts.pop(user_id, []))
         return DeletionReport(
             user_id=user_id,
-            deleted={"turns": before - len(self.turns), "conversations": len(convs)},
+            deleted={
+                "user_facts": facts,
+                "conversation_summaries": len(summaries),
+                "turns": before - len(self.turns),
+                "conversations": len(convs),
+            },
         )
 
 

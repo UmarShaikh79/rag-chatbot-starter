@@ -17,12 +17,15 @@ from chatbot.core.types import (
     GuardResult,
     IndexInfo,
     Job,
+    MemoryState,
     Message,
     ParsedDocument,
+    PiiSpan,
     RawDocument,
     ScoredChunk,
     Turn,
     Usage,
+    UserFact,
 )
 
 
@@ -114,12 +117,50 @@ class Guard(Protocol):
 
 
 @runtime_checkable
+class PiiDetector(Protocol):
+    """Finds PII spans. Several detectors can run together; their spans are merged."""
+
+    name: str
+
+    def find(self, text: str) -> list[PiiSpan]: ...
+
+
+@runtime_checkable
+class InjectionDetector(Protocol):
+    """Returns reasons (empty when the text looks safe). ``stage`` is input or context."""
+
+    name: str
+
+    async def detect(self, text: str, stage: str) -> list[str]: ...
+
+
+@runtime_checkable
 class MemoryStore(Protocol):
+    """Turns, rolling summaries and long-term user facts. All text arrives redacted."""
+
     async def load(
-        self, user_id: str | None, conversation_id: str | None, history_turns: int
+        self,
+        user_id: str | None,
+        conversation_id: str | None,
+        history_turns: int,
+        facts_limit: int = 0,
     ) -> ConversationContext: ...
 
     async def save_turns(self, ctx: ConversationContext, turns: list[Turn]) -> None: ...
+
+    async def memory_state(self, conversation_id: str) -> MemoryState | None: ...
+
+    async def turns_after(self, conversation_id: str, after_id: int) -> list[Turn]: ...
+
+    async def save_summary(self, state: MemoryState) -> None: ...
+
+    async def add_facts(
+        self, user_id: str, facts: list[str], conversation_id: str | None, max_facts: int
+    ) -> int: ...
+
+    async def list_facts(self, user_id: str, limit: int = 100) -> list[UserFact]: ...
+
+    async def delete_fact(self, user_id: str, fact_id: int) -> bool: ...
 
     async def forget_user(self, user_id: str) -> DeletionReport: ...
 

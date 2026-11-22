@@ -152,9 +152,33 @@ def test_conversation_is_persisted_redacted_and_forgettable(app_client):
     assert len(stored) == 4
     assert "sam@example.com" not in json.dumps(stored) and "[EMAIL]" in stored[0]
 
+    # Long-term memory: the worker extracts facts in the background (ADR 016).
+    app_client.post(
+        "/v1/chat",
+        json={
+            "message": "I use the Team plan. Can I share a notebook?",
+            "user_id": "u7",
+            "conversation_id": first["conversation_id"],
+        },
+    )
+    run_jobs(app_client)
+    facts = app_client.get("/v1/users/u7/memory").json()["facts"]
+    assert [f["fact"] for f in facts] == ["The user said: I use the Team plan."]
+
+    async def rows_for_u7():
+        async with app_client.components.pool.connection() as conn:
+            counts = {}
+            for table in ("user_facts", "conversation_summaries", "turns", "conversations"):
+                cur = await conn.execute(f"SELECT count(*) AS n FROM {table} WHERE user_id = 'u7'")
+                counts[table] = (await cur.fetchone())["n"]
+            return counts
+
+    assert app_client.portal.call(rows_for_u7)["conversation_summaries"] == 1
+
     report = app_client.delete("/v1/users/u7/memory").json()
-    assert report["deleted"]["turns"] == 4
+    assert report["deleted"]["turns"] == 6 and report["deleted"]["user_facts"] == 1
     assert app_client.portal.call(turns) == []
+    assert set(app_client.portal.call(rows_for_u7).values()) == {0}
 
 
 def test_golden_retrieval_hit_rate(app_client):

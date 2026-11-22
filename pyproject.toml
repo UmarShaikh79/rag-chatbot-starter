@@ -1,6 +1,6 @@
 [project]
 name = "rag-chatbot-starter"
-version = "0.1.0"
+version = "0.2.0"
 description = "Clone-and-own boilerplate for a config-driven RAG chatbot backend (FastAPI, Postgres, pgvector)."
 readme = "README.md"
 license = "MIT"
@@ -19,9 +19,13 @@ dependencies = [
     "python-docx>=1.1",
     "beautifulsoup4>=4.12",
     "httpx>=0.27",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]
+presidio = [
+    "presidio-analyzer>=2.2",
+]
 # Later milestones add extras here: ollama, langgraph, qdrant, bm25, rerank, langfuse, otel, graphql.
 
 [project.scripts]

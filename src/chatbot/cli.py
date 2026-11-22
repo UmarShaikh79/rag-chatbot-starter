@@ -148,6 +148,29 @@ def cmd_hash_key(args: argparse.Namespace) -> None:
     print(f"Hash (put in CHATBOT_API_KEYS): {digest}")
 
 
+def cmd_dev_token(args: argparse.Namespace) -> None:
+    """Sign an HS256 token for trying auth.mode: jwt locally, without an identity provider."""
+    import os
+
+    from chatbot.auth.jwt import sign_dev_token
+
+    jwt_cfg = load_settings().auth.jwt
+    env = jwt_cfg.hs256_secret_env
+    secret = os.environ.get(env or "")
+    if not env or not secret:
+        print(
+            "Set auth.jwt.hs256_secret_env (and add HS256 to auth.jwt.algorithms), then put a "
+            "secret of 32+ characters in that env var.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if not jwt_cfg.issuer or not jwt_cfg.audience:
+        print("Set auth.jwt.issuer and auth.jwt.audience first.", file=sys.stderr)
+        sys.exit(2)
+    scopes = [jwt_cfg.admin_scope] if args.admin else []
+    print(sign_dev_token(secret, args.sub, jwt_cfg.issuer, jwt_cfg.audience, args.ttl, scopes))
+
+
 def cmd_check_config(_: argparse.Namespace) -> None:
     settings = load_settings()
     print(json.dumps(settings.model_dump(mode="json", exclude={"catalog"}), indent=2))
@@ -182,6 +205,12 @@ def main(argv: list[str] | None = None) -> None:
     hk = sub.add_parser("hash-key", help="create an API key, or hash an existing one")
     hk.add_argument("key", nargs="?")
     hk.set_defaults(func=cmd_hash_key)
+
+    dt = sub.add_parser("dev-token", help="sign a local HS256 JWT for trying auth.mode: jwt")
+    dt.add_argument("--sub", required=True, help="the user ID the token stands for")
+    dt.add_argument("--ttl", type=int, default=3600, help="lifetime in seconds")
+    dt.add_argument("--admin", action="store_true", help="add the admin scope")
+    dt.set_defaults(func=cmd_dev_token)
 
     sub.add_parser("check-config", help="print the merged configuration").set_defaults(
         func=cmd_check_config

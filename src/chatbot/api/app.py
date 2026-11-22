@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 from chatbot import __version__
 from chatbot.api.middleware import TraceMiddleware
 from chatbot.api.routes import chat, health, ingest, memory
-from chatbot.auth.api_key import ApiKeyAuth
+from chatbot.auth.api_key import Authenticator
+from chatbot.auth.principal import require_admin
 from chatbot.core import container
 from chatbot.core.errors import ForbiddenError, IndexMismatchError, NotFoundError
 from chatbot.core.settings import Settings, get_settings
@@ -22,11 +23,13 @@ log = logging.getLogger(__name__)
 
 
 def create_app(
-    settings: Settings | None = None, components: container.Components | None = None
+    settings: Settings | None = None,
+    components: container.Components | None = None,
+    auth: Authenticator | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.observability.log_level, settings.observability.log_format)
-    auth = ApiKeyAuth(settings.auth)
+    auth = auth or Authenticator(settings.auth)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -55,9 +58,12 @@ def create_app(
     )
     app.add_middleware(TraceMiddleware)
     protected = [Depends(auth)]
+    # End users signed in with a JWT can chat and manage their own memory; ingestion,
+    # documents and jobs need an API key or a token with the admin scope.
+    admin_only = [Depends(auth), Depends(require_admin)]
     app.include_router(health.router)
     app.include_router(chat.router, dependencies=protected)
-    app.include_router(ingest.router, dependencies=protected)
+    app.include_router(ingest.router, dependencies=admin_only)
     app.include_router(memory.router, dependencies=protected)
 
     def error(status: int, message: str) -> JSONResponse:

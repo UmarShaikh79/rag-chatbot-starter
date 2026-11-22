@@ -8,6 +8,7 @@ from chatbot.core.container import Components, make_source
 from chatbot.core.types import Job
 from chatbot.ingestion.jobs.worker import Handler
 from chatbot.ingestion.pipeline import InlineDocument
+from chatbot.memory.manager import MEMORY_REFRESH
 
 SYNC_SOURCE = "sync_source"
 INGEST_DOCUMENTS = "ingest_documents"
@@ -26,4 +27,10 @@ def make_handlers(c: Components) -> dict[str, Handler]:
         )
         return report.model_dump(mode="json")
 
-    return {SYNC_SOURCE: sync_source, INGEST_DOCUMENTS: ingest_documents}
+    async def memory_refresh(job: Job) -> dict[str, Any]:
+        return await c.memory_manager.refresh(job.payload["conversation_id"])
+
+    handlers: dict[str, Handler] = {SYNC_SOURCE: sync_source, INGEST_DOCUMENTS: ingest_documents}
+    if c.memory_manager is not None and c.memory_manager.enabled:
+        handlers[MEMORY_REFRESH] = memory_refresh
+    return handlers

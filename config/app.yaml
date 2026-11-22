@@ -8,8 +8,19 @@ app:
   env: dev                          # dev | prod
 
 auth:
-  mode: api_key                     # none | api_key
+  mode: api_key                     # none | api_key | jwt | api_key_or_jwt (ADR 017)
   api_keys_env: CHATBOT_API_KEYS    # comma-separated SHA-256 hashes; `chatbot hash-key` makes one
+  jwt:                              # used by the jwt modes; tokens from any OIDC provider
+    issuer: null                    # e.g. https://your-tenant.eu.auth0.com/ (must match iss)
+    audience: null                  # e.g. chatbot-api (must appear in aud)
+    jwks_url: null                  # null: discovered from {issuer}/.well-known/openid-configuration
+    algorithms: [RS256, ES256]      # add HS256 only for local dev tokens
+    hs256_secret_env: null          # env var with the HS256 secret (`chatbot dev-token`)
+    user_id_claim: sub              # becomes the chat user_id; end users can't pick another
+    required_scopes: []
+    admin_scope: "chatbot:admin"    # may act for any user and use ingestion routes
+    leeway_s: 30
+    jwks_cache_s: 3600
 
 models:                             # names point into config/models.yaml
   answer: openai:answer
@@ -59,7 +70,7 @@ retrieval:
   thresholds_from: index            # index | config; calibrated values stored with the index win
 
 answer:
-  prompt: answer/v1
+  prompt: answer/v2                 # v2 adds the memory section; v1 still works
   clarify_prompt: clarify/v1
   max_context_chunks: 6
   citations: required               # required | optional
@@ -70,6 +81,18 @@ memory:
   backend: postgres
   history_turns: 10
   redact_before_persist: true       # ADR 015
+  run_in: worker                    # worker (background job after each turn) | inline (ADR 016)
+  summary:                          # rolling summary of turns older than the history window
+    enabled: true
+    prompt: summarize/v1
+    refresh_after_turns: 4          # fold once this many turns have left the window
+    max_chars: 1500
+  long_term:                        # facts about a user_id, kept across conversations
+    enabled: true
+    prompt: extract_facts/v1
+    max_facts_per_user: 50          # oldest (least recently seen) are dropped beyond this
+    facts_in_prompt: 20
+    max_fact_chars: 200
 
 guardrails:
   input:
@@ -78,8 +101,23 @@ guardrails:
     injection_check: true
   context:
     injection_check: true           # drop retrieved chunks that look like instructions
-  output:
+  output:                           # runs on the complete answer, in streaming mode too
     pii_redaction: true
+    prompt_leak_check: true         # refuse answers that repeat the system prompt verbatim
+  pii:
+    detectors: [regex]              # regex | presidio (names, places; `uv sync --extra presidio`)
+    allow: []                       # strings never redacted, e.g. your public support email
+    presidio:
+      language: en
+      spacy_model: en_core_web_sm
+      score_threshold: 0.5
+  injection:
+    detectors: [heuristic]          # heuristic | llm (a classifier call on the cheap model)
+    llm:
+      model_role: cheap
+      prompt: guard_injection/v1
+      stages: [input]               # input | context; one model call per checked text
+      on_error: allow               # allow | block when the classifier call fails
   stream_holdback_chars: 64         # rolling buffer so PII is never split across SSE events
 
 observability:

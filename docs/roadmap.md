@@ -2,17 +2,18 @@
 
 Each milestone ends in something runnable. Order and scope follow the architecture plan; no dates.
 
-## M1: end-to-end demo (this release)
+## M1: end-to-end demo (done)
 
 Ingest sample documents, ask, get a cited answer or a clarifying question. OpenAI + pgvector +
 dense retrieval, API keys, Docker Compose, Postgres job queue, heuristic PII and injection
 guards, streaming contract, per-user deletion, unit/integration/e2e tests and CI.
 
-## M2: safety and memory
+## M2: safety and memory (this release)
 
-Presidio (or model-based) PII detection and model-based injection checks as options; rolling
+Detector chains for PII (regex, optional Presidio) and injection (hardened heuristics, optional
+model classifier); prompt-leak check on the final text in every stream mode; rolling
 conversation summaries and long-term user facts, both redacted before storage and covered by
-`forget_user`; checks on the final text in streaming mode; JWT/OIDC auth.
+`forget_user`; JWT/OIDC auth alongside API keys.
 
 ## M3: retrieval quality and evals
 

@@ -36,6 +36,8 @@ BUILTIN_MODULES = [
     "chatbot.ingestion.parsers",
     "chatbot.ingestion.chunkers.recursive",
     "chatbot.retrieval.dense",
+    "chatbot.guardrails.pii",
+    "chatbot.guardrails.injection",
     "chatbot.domain",  # last: your overrides win
 ]
 
@@ -81,6 +83,7 @@ class Components:
     prompts: PromptRegistry
     orchestrator: Any
     pipeline: Any
+    memory_manager: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     async def close(self) -> None:
@@ -97,6 +100,7 @@ def build(
     load_modules()
     from chatbot.ingestion.jobs.queue import PostgresJobQueue
     from chatbot.ingestion.pipeline import IngestionPipeline
+    from chatbot.memory.manager import MemoryManager
     from chatbot.memory.postgres import PostgresMemoryStore
     from chatbot.orchestration.simple import SimpleOrchestrator
 
@@ -118,12 +122,21 @@ def build(
     )
     memory = part("memory", lambda: PostgresMemoryStore(pool))
     queue = part("queue", lambda: PostgresJobQueue(pool, settings.ingestion.worker.lock_timeout_s))
-    guards = part("guards", lambda: GuardPipeline.from_config(settings.guardrails))
     prompts = part("prompts", lambda: PromptRegistry(settings.root_dir / "prompts"))
+    guards = part(
+        "guards",
+        lambda: GuardPipeline.from_config(
+            settings.guardrails, {"answer": answer_llm, "cheap": cheap_llm}, prompts
+        ),
+    )
+    memory_manager = part(
+        "memory_manager",
+        lambda: MemoryManager(settings.memory, memory, cheap_llm, prompts, guards, queue),
+    )
     orchestrator = part(
         "orchestrator",
         lambda: SimpleOrchestrator(
-            settings, answer_llm, cheap_llm, retriever, memory, guards, prompts
+            settings, answer_llm, cheap_llm, retriever, memory, guards, prompts, memory_manager
         ),
     )
     pipeline = part(
@@ -147,4 +160,5 @@ def build(
         prompts=prompts,
         orchestrator=orchestrator,
         pipeline=pipeline,
+        memory_manager=memory_manager,
     )
