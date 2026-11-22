@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from chatbot import __version__
-from chatbot.api.middleware import TraceMiddleware
+from chatbot.api.middleware import UNTRACED, TraceMiddleware
 from chatbot.api.routes import chat, health, ingest, memory, usage
 from chatbot.auth.api_key import Authenticator
 from chatbot.auth.principal import require_admin
@@ -21,6 +23,23 @@ from chatbot.observability.logging import configure_logging, get_trace_id
 from chatbot.observability.tracing import configure_telemetry, shutdown_telemetry
 
 log = logging.getLogger(__name__)
+
+
+def _is_probe(scope: Any) -> bool:
+    return scope.get("type") == "http" and scope.get("path") in UNTRACED
+
+
+def _fastapi_telemetry() -> dict[str, Any]:
+    """FastAPI 0.165+ traces and meters requests itself once an OpenTelemetry provider exists
+    (ADR 026 sets one). TraceMiddleware already owns the server span (continuing
+    ``traceparent``) and the HTTP metric, so FastAPI's would duplicate them: a second, empty
+    root trace per request, every request counted twice, and a trace per health check. Turn
+    its request spans and metrics off and skip probes entirely; its dependency, endpoint and
+    serialization spans still nest under the template's server span. Older FastAPI has no
+    ``telemetry`` argument and nothing to turn off."""
+    if "telemetry" not in inspect.signature(FastAPI.__init__).parameters:
+        return {}
+    return {"telemetry": {"tracing": False, "metrics": False, "exclude": _is_probe}}
 
 
 def create_app(
@@ -58,6 +77,7 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
         description="RAG chatbot backend. Integrate from any stack over HTTP/SSE.",
+        **_fastapi_telemetry(),
     )
     app.add_middleware(TraceMiddleware)
     protected = [Depends(auth)]

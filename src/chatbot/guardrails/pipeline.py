@@ -18,10 +18,18 @@ from chatbot.guardrails.pii import PiiGuard, Redactor
 
 
 class GuardPipeline:
-    def __init__(self, guards: list[Guard], redactor: Redactor | None = None) -> None:
+    def __init__(
+        self,
+        guards: list[Guard],
+        redactor: Redactor | None = None,
+        output_redactor: Redactor | None = None,
+    ) -> None:
         self.guards = guards
-        # The configured PII redactor, shared with persistence and the stream redactor.
+        # PII redactors. ``redactor``: user messages and what is stored from them (questions,
+        # summaries, facts). ``output_redactor``: answers, in the output guard, the streamed
+        # drafts and the stored answer, so all three agree (``guardrails.pii.output_detectors``).
         self.redactor = redactor or Redactor()
+        self.output_redactor = output_redactor or self.redactor
 
     def stage(self, stage: str) -> list[Guard]:
         return [g for g in self.guards if g.stage == stage]
@@ -51,7 +59,7 @@ class GuardPipeline:
         model-based injection detector."""
         import chatbot.guardrails.injection  # noqa: F401  (registers the detectors)
 
-        redactor = Redactor.from_config(cfg)
+        redactor, output_redactor = Redactor.pair_from_config(cfg)
         detectors: list[InjectionDetector] = []
         if cfg.input.injection_check or cfg.context.injection_check:
             detectors = [
@@ -68,5 +76,5 @@ class GuardPipeline:
         if cfg.output.prompt_leak_check:
             guards.append(PromptLeakGuard())
         if cfg.output.pii_redaction:
-            guards.append(PiiGuard("output", redactor))
-        return cls(guards, redactor)
+            guards.append(PiiGuard("output", output_redactor))
+        return cls(guards, redactor, output_redactor)

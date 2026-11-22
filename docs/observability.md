@@ -63,6 +63,14 @@ models, tokens and cost. Turn it on to see prompts, retrieved chunk IDs and scor
 The text is always what the guards produced, so PII in user messages is already redacted.
 Retrieved documents are not redacted.
 
+FastAPI 0.165+ can trace and meter requests itself. The app turns that off
+(`api/app.py`, `_fastapi_telemetry`) because the template's middleware already makes the server
+span and the HTTP metric: left on, every request became two traces, was counted twice, and
+every health check became a trace. Probes (`/healthz`, `/livez`, `/readyz`) are never traced.
+
+Querying Jaeger from a script: Jaeger 2.x serves its API under `/api/v3/...`
+(`/api/v3/services`, `/api/v3/traces/<trace_id>`).
+
 ## Metrics
 
 | Metric | Type | Attributes |
@@ -111,8 +119,8 @@ CHATBOT__OBSERVABILITY__LANGFUSE__ENABLED=true uv run chatbot serve
 
 Each chat turn becomes a Langfuse trace with the user (`user_id`) and session (the
 conversation), generations with model, tokens and cost, and the retrieval, guard and
-groundedness steps as typed observations. Only the chatbot's own spans are sent; HTTP and
-database spans are not. It works alongside `otel` (both can be on). Self-hosted Langfuse
+groundedness steps as typed observations. Only the chatbot's own spans are sent; HTTP spans
+(and any library spans you add) are not. It works alongside `otel` (both can be on). Self-hosted Langfuse
 needs version 3.22 or later. See ADR 027.
 
 Privacy: Langfuse gets text by default (`langfuse.capture_text: true`) because reading
