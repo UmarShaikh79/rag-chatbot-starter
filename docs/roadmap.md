@@ -23,7 +23,7 @@ follow-ups, rerank (Cohere, local cross-encoder); a gate score so thresholds sur
 `chatbot eval` with retrieval, answer, faithfulness and abstention metrics; an offline CI gate
 on every pull request and a nightly live run; optional groundedness check on answers.
 
-## M4: local and alternative providers (this release)
+## M4: local and alternative providers (done)
 
 Ollama chat and `nomic-embed-text` embeddings (`local-ollama` profile); Qdrant as a second
 vector store with Postgres keeping the index catalog; `chatbot reindex` builds a new physical
@@ -31,7 +31,17 @@ index beside the live one, `chatbot index activate` flips the alias and `rollbac
 back; SQL record source; pgvector operations guide (filtered search tuning, autovacuum,
 `REINDEX INDEX CONCURRENTLY`); Compose profiles for Ollama and Qdrant.
 
-## M5: production extras
+## M5: production extras (this release)
 
-OpenTelemetry, Langfuse, LangGraph orchestrator adapter, Kubernetes example, optional GraphQL,
-typed TypeScript client generated from the OpenAPI spec, docs site.
+OpenTelemetry traces and metrics behind a no-op-by-default facade; Langfuse over its OTLP
+endpoint; token and cost accounting per chat turn and job (`usage_records`, `GET /v1/usage`,
+`chatbot usage`); LangGraph as an optional orchestrator running the same steps as the default;
+`/livez` and `/readyz`; a Kubernetes example (Kustomize base, dev and prod overlays, an
+OpenTelemetry Collector component); a Compose profile with a Collector and Jaeger.
+
+## Open, not scheduled
+
+From the architecture plan, not built yet: an optional GraphQL API beside REST, a typed
+TypeScript client generated from the OpenAPI spec, and a docs site. Other gaps worth a
+milestone: per-user rate limits and budgets (the usage records make them possible), retention
+for turns and usage records, and a Helm chart for teams that prefer one.

@@ -1,0 +1,59 @@
+# A local cluster (kind, minikube, k3d, Docker Desktop) with Postgres inside it and the
+# offline profile, so it runs with no API keys. Not for production: the database has one
+# replica, a fixed password and no backups.
+#
+#   docker build -f docker/Dockerfile -t chatbot:dev .
+#   kind load docker-image chatbot:dev        # or: minikube image load chatbot:dev
+#   kubectl apply -k deploy/k8s/overlays/dev
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: chatbot-dev
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - postgres.yaml
+
+images:
+  - name: chatbot
+    newName: chatbot
+    newTag: dev
+
+patches:
+  - target: {kind: Deployment, name: chatbot-api}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+      - op: add
+        path: /spec/template/spec/initContainers/0/imagePullPolicy
+        value: IfNotPresent
+  - target: {kind: Deployment, name: chatbot-worker}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target: {kind: CronJob, name: chatbot-ingest}
+    patch: |-
+      - op: add
+        path: /spec/suspend
+        value: true
+
+configMapGenerator:
+  - name: chatbot-config
+    behavior: merge
+    literals:
+      - CHATBOT_PROFILE=offline          # hashing embedder + extractive fake LLM
+      - CHATBOT__AUTH__MODE=none         # no API key on a local cluster
+      - CHATBOT__OBSERVABILITY__LOG_FORMAT=text
+
+secretGenerator:
+  - name: chatbot-secrets
+    literals:
+      - DATABASE_URL=postgresql://chatbot:chatbot@postgres:5432/chatbot
+      - CHATBOT_API_KEYS=
+      - OPENAI_API_KEY=

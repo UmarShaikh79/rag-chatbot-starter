@@ -7,6 +7,10 @@ Flow per turn:
   -> output guards (on the complete text, in every mode) -> persist (redacted)
   -> schedule memory refresh -> terminal event
 
+Each step is a method that reads and updates a ``TurnState`` and names the next step in
+``state.route``; ``_flow`` runs them in order, and the LangGraph adapter runs the same
+methods as graph nodes (ADR 029), so both behave the same.
+
 ``stream`` and ``run`` share one implementation. In draft_then_final mode, delta events
 carry draft text through a PII-safe rolling buffer and exactly one terminal event follows
 (ADR 014). ``run`` and buffered mode emit only the terminal event.
@@ -21,6 +25,7 @@ from typing import Any
 from chatbot.core.errors import ChatbotError
 from chatbot.core.interfaces import LLM, MemoryStore, Retriever
 from chatbot.core.prompts import PromptRegistry
+from chatbot.core.registry import registry
 from chatbot.core.settings import Settings
 from chatbot.core.types import (
     ChatEvent,
@@ -38,8 +43,10 @@ from chatbot.guardrails.pii import StreamRedactor
 from chatbot.guardrails.pipeline import GuardPipeline
 from chatbot.memory.manager import MemoryManager, format_memory
 from chatbot.observability.logging import get_trace_id
+from chatbot.observability.tracing import count, root_io, span
 from chatbot.observability.usage import priced, priced_mixed
 from chatbot.orchestration.citations import align, format_sources
+from chatbot.orchestration.state import TurnState
 from chatbot.retrieval.rewrite import QueryRewriter
 from chatbot.retrieval.weak import assess
 
@@ -147,9 +154,12 @@ class SimpleOrchestrator:
     async def _check_output(self, text: str, messages: list[Message]) -> tuple[str, list[str]]:
         """Output guards on the complete text. Returns (text, block reasons)."""
         system = next((m.content for m in messages if m.role == "system"), "")
-        result = await self.guards.run("output", text, {"system_prompt": system})
+        with span("output guards", type="guardrail") as s:
+            result = await self.guards.run("output", text, {"system_prompt": system})
+            s.set({"chatbot.guard.action": result.action, "chatbot.guard.reasons": result.reasons})
         if result.action == "block":
             log.warning("output blocked", extra={"reasons": result.reasons})
+            count("chatbot.guard.blocks", 1, {"chatbot.guard.stage": "output"})
             return REFUSAL_TEXT, result.reasons
         return result.text, []
 
@@ -196,72 +206,151 @@ class SimpleOrchestrator:
     # ------------------------------------------------------------------ the flow
 
     async def _flow(self, req: ChatRequest, draft: bool) -> AsyncIterator[ChatEvent]:
-        cfg = self.settings
-        usage = Usage()
-        drafted = ""
+        """The turn as plain code. Each step reads and updates one ``TurnState`` and sets
+        ``state.route`` to the step that comes next; the LangGraph adapter runs the same
+        steps as graph nodes (ADR 029)."""
+        st = TurnState(request=req, draft=draft)
+        await self.check_input(st)  # -> retrieve | finish (blocked)
+        if st.route == "retrieve":
+            await self.retrieve(st)  # -> answer | clarify (weak retrieval)
+        if st.route == "answer":
+            async for event in self.answer(st):  # -> check_grounded | check_output | clarify
+                yield event
+        if st.route == "check_grounded":
+            await self.check_grounded(st)  # -> check_output | clarify | finish (refused)
+        if st.route == "check_output":
+            await self.check_output(st)  # -> finish
+        if st.route == "clarify":
+            async for event in self.clarify(st):  # -> finish
+                yield event
+        yield self.terminal(st)
 
-        def terminal(data: dict[str, Any]) -> ChatEvent:
-            if data["kind"] == "refuse":
-                return ChatEvent(event="refusal", data=data)
-            if draft and drafted.strip() != data["answer"].strip():
-                return ChatEvent(event="replace", data=data)
-            return ChatEvent(event="final", data=data)
+    # ------------------------------------------------------------------ the steps
 
-        # 1. Input guards (length, injection, PII).
-        checked = await self.guards.run("input", req.message)
-        facts_limit = self.memory_manager.facts_in_prompt if self.memory_manager else 0
-        ctx = await self.memory.load(
-            req.user_id, req.conversation_id, cfg.memory.history_turns, facts_limit
+    def terminal(self, st: TurnState) -> ChatEvent:
+        """The one terminal event: refusal, replace (the drafts changed) or final."""
+        data = st.response
+        if data is None:
+            raise ChatbotError("orchestrator ended without a response")
+        if data["kind"] == "refuse":
+            return ChatEvent(event="refusal", data=data)
+        if st.draft and st.drafted.strip() != data["answer"].strip():
+            return ChatEvent(event="replace", data=data)
+        return ChatEvent(event="final", data=data)
+
+    async def _finish(
+        self,
+        st: TurnState,
+        text: str,
+        kind: ResponseKind,
+        warnings: list[str] | None = None,
+        citations: list | None = None,
+        question: str | None = None,
+    ) -> None:
+        assert st.ctx is not None
+        await self._persist(st.ctx, st.question if question is None else question, text, kind)
+        st.response = self._response(
+            st.ctx, text, kind, st.usage, citations, st.warnings + (warnings or [])
         )
+        st.route = "finish"
+        root_io(output=text)
+
+    async def check_input(self, st: TurnState) -> None:
+        """Input guards (length, injection, PII), then load history, summary and facts."""
+        cfg = self.settings
+        req = st.request
+        with span("input guards", type="guardrail") as s:
+            checked = await self.guards.run("input", req.message)
+            s.set(
+                {"chatbot.guard.action": checked.action, "chatbot.guard.reasons": checked.reasons}
+            )
+            s.io(output=checked.text if checked.action != "block" else None)
+        facts_limit = self.memory_manager.facts_in_prompt if self.memory_manager else 0
+        with span("load memory") as s:
+            st.ctx = await self.memory.load(
+                req.user_id, req.conversation_id, cfg.memory.history_turns, facts_limit
+            )
+            s.set(
+                {
+                    "chatbot.memory.turns": len(st.ctx.history),
+                    "chatbot.memory.facts": len(st.ctx.facts),
+                    "chatbot.memory.summary_chars": len(st.ctx.summary),
+                }
+            )
         if checked.action == "block":
             log.info("input blocked", extra={"reasons": checked.reasons})
+            count("chatbot.guard.blocks", 1, {"chatbot.guard.stage": "input"})
             text = TOO_LONG_TEXT if "too_long" in checked.reasons else REFUSAL_TEXT
-            await self._persist(ctx, "[blocked message]", text, "refuse")
-            yield terminal(self._response(ctx, text, "refuse", usage, warnings=checked.reasons))
+            await self._finish(
+                st, text, "refuse", warnings=checked.reasons, question="[blocked message]"
+            )
             return
-        question = checked.text
-        warnings = [r for r in checked.reasons if r.startswith("pii:")]
+        st.question = checked.text
+        st.warnings = [r for r in checked.reasons if r.startswith("pii:")]
+        root_io(input=st.question)  # the redacted question, never the raw message
         if cfg.observability.log_message_text:
-            log.info("question", extra={"text": question})
+            log.info("question", extra={"text": st.question})
+        st.route = "retrieve"
 
-        # 2. Retrieve (with a standalone rewrite of follow-ups when enabled), then drop
-        #    retrieved chunks that look like injected instructions.
-        query = question
+    async def retrieve(self, st: TurnState) -> None:
+        """Rewrite follow-ups (optional), retrieve, drop chunks that look like injected
+        instructions, then decide whether retrieval is strong enough to answer."""
+        cfg = self.settings
+        assert st.ctx is not None
+        st.query = st.question
         if self.rewriter is not None:
-            query, rewrite_usage = await self.rewriter.rewrite(question, ctx.history)
-            usage = usage.add(priced(rewrite_usage, self.prices["cheap"]))
-            if cfg.observability.log_message_text and query != question:
-                log.info("query rewritten", extra={"text": query})
-        hits, retrieval_usage = await self.retriever.retrieve(
-            query, cfg.retrieval.top_k, req.filters
-        )
-        usage = usage.add(priced_mixed(retrieval_usage, self.prices["cheap"], self.prices["embed"]))
+            st.query, rewrite_usage = await self.rewriter.rewrite(st.question, st.ctx.history)
+            st.usage = st.usage.add(priced(rewrite_usage, self.prices["cheap"]))
+            if cfg.observability.log_message_text and st.query != st.question:
+                log.info("query rewritten", extra={"text": st.query})
+        scorer = getattr(self.retriever, "scorer", "dense|dense")
+        with span(
+            "retrieve",
+            type="retriever",
+            attrs={
+                "chatbot.retrieval.scorer": scorer,
+                "chatbot.retrieval.top_k": cfg.retrieval.top_k,
+            },
+        ) as s:
+            s.io(input=st.query)
+            hits, retrieval_usage = await self.retriever.retrieve(
+                st.query, cfg.retrieval.top_k, st.request.filters
+            )
+            st.usage = st.usage.add(
+                priced_mixed(retrieval_usage, self.prices["cheap"], self.prices["embed"])
+            )
+            s.set({"chatbot.retrieval.hits": len(hits)})
+            s.io(output=[{"id": h.chunk.id, "score": round(h.score, 4)} for h in hits])
         if self.guards.stage("context"):
             safe: list[ScoredChunk] = []
-            for hit in hits:
-                result = await self.guards.run("context", hit.chunk.text)
-                if result.action == "block":
-                    log.warning(
-                        "dropped retrieved chunk",
-                        extra={"chunk_id": hit.chunk.id, "reasons": result.reasons},
-                    )
-                else:
-                    safe.append(hit)
+            with span("context guards", type="guardrail") as s:
+                for hit in hits:
+                    result = await self.guards.run("context", hit.chunk.text)
+                    if result.action == "block":
+                        log.warning(
+                            "dropped retrieved chunk",
+                            extra={"chunk_id": hit.chunk.id, "reasons": result.reasons},
+                        )
+                        count("chatbot.guard.blocks", 1, {"chatbot.guard.stage": "context"})
+                    else:
+                        safe.append(hit)
+                s.set({"chatbot.guard.dropped": len(hits) - len(safe)})
             hits = safe
+        st.hits = hits
 
-        # 3. Weak retrieval -> clarify (or refuse); never invent an answer.
+        # Weak retrieval -> clarify (or refuse); never invent an answer.
         index = await self.retriever.index() if hasattr(self.retriever, "index") else None
         calibration = None
         if index is not None and hasattr(self.retriever, "calibration"):
             calibration = await self.retriever.calibration(index)
-        scorer = getattr(self.retriever, "scorer", "dense|dense")
-        verdict = assess(
+        st.verdict = verdict = assess(
             hits,
             cfg.retrieval,
             calibration,
             gate=getattr(self.retriever, "gate", None),
             warn_key=f"{index.name}:{scorer}" if index is not None else None,
         )
+        top = round(hits[0].score, 4) if hits else None
         log.info(
             "retrieval",
             extra={
@@ -269,117 +358,133 @@ class SimpleOrchestrator:
                 "strong": len(verdict.strong),
                 "weak": verdict.weak,
                 "gate": verdict.gate,
-                "top_score": round(hits[0].score, 4) if hits else None,
+                "top_score": top,
             },
         )
+        count(
+            "chatbot.retrieval.requests",
+            1,
+            {"chatbot.retrieval.weak": verdict.weak, "chatbot.retrieval.gate": verdict.gate},
+        )
+        st.route = "clarify" if verdict.weak else "answer"
 
-        async def clarify() -> AsyncIterator[ChatEvent]:
-            nonlocal usage, drafted
+    async def clarify(self, st: TurnState) -> AsyncIterator[ChatEvent]:
+        """Ask a clarifying question (or refuse, with answer.on_weak_retrieval: refuse)."""
+        cfg = self.settings
+        assert st.ctx is not None
+        with span("clarify"):
             if cfg.answer.on_weak_retrieval == "refuse":
                 text = WEAK_REFUSAL_TEXT
-                if draft:
-                    drafted += text
+                if st.draft:
+                    st.drafted += text
                     yield ChatEvent(event="delta", data={"text": text})
-                await self._persist(ctx, question, text, "clarify")
-                yield terminal(self._response(ctx, text, "clarify", usage, warnings=warnings))
+                await self._finish(st, text, "clarify")
                 return
             topics = sorted(
-                {str(h.chunk.metadata.get("title")) for h in hits if h.chunk.metadata.get("title")}
+                {
+                    str(h.chunk.metadata.get("title"))
+                    for h in st.hits
+                    if h.chunk.metadata.get("title")
+                }
             )
             prompt = self.prompts.get(cfg.answer.clarify_prompt)
             messages = prompt.render(
-                question=question,
-                history=self._history(ctx),
-                memory=format_memory(ctx),
+                question=st.question,
+                history=self._history(st.ctx),
+                memory=format_memory(st.ctx),
                 topics=", ".join(topics[:5]) or "(none)",
             )
             text = ""
-            async for kind, piece, u in self._generate(self.cheap_llm, messages, "clarify", draft):
+            async for kind, piece, u in self._generate(
+                self.cheap_llm, messages, "clarify", st.draft
+            ):
                 if kind == "delta":
-                    drafted += piece
+                    st.drafted += piece
                     yield ChatEvent(event="delta", data={"text": piece})
                 else:
                     text = piece
-                    usage = usage.add(priced(u or Usage(), self.prices["cheap"]))
+                    st.usage = st.usage.add(priced(u or Usage(), self.prices["cheap"]))
             text, blocked = await self._check_output(text.strip(), messages)
-            kind: ResponseKind = "refuse" if blocked else "clarify"
-            await self._persist(ctx, question, text, kind)
-            yield terminal(self._response(ctx, text, kind, usage, warnings=warnings + blocked))
+            await self._finish(st, text, "refuse" if blocked else "clarify", warnings=blocked)
 
-        if verdict.weak:
-            async for event in clarify():
-                yield event
-            return
-
-        # 4. Answer from numbered sources.
-        sources = verdict.usable[: cfg.answer.max_context_chunks]
-        prompt = self.prompts.get(cfg.answer.prompt)
-        abstain = str(prompt.output.get("abstain_token", "INSUFFICIENT_CONTEXT"))
-        messages = prompt.render(
-            question=question,
-            sources=format_sources(sources),
-            history=self._history(ctx),
-            memory=format_memory(ctx),
-        )
-        raw = ""
-        async for kind, piece, u in self._generate(
-            self.answer_llm, messages, "answer", draft, abstain
-        ):
-            if kind == "delta":
-                drafted += piece
-                yield ChatEvent(event="delta", data={"text": piece})
-            else:
-                raw = piece
-                usage = usage.add(priced(u or Usage(), self.prices["answer"]))
-
-        # 5. The model abstained, or cited nothing while citations are required: clarify.
-        answer, citations = align(raw, sources)
-        if abstain in raw or (cfg.answer.citations == "required" and not citations):
-            log.info(
-                "answer rejected", extra={"abstained": abstain in raw, "citations": len(citations)}
+    async def answer(self, st: TurnState) -> AsyncIterator[ChatEvent]:
+        """Answer from numbered sources, then align the [n] citations with them."""
+        cfg = self.settings
+        assert st.ctx is not None and st.verdict is not None
+        with span("answer") as s:
+            st.sources = st.verdict.usable[: cfg.answer.max_context_chunks]
+            prompt = self.prompts.get(cfg.answer.prompt)
+            abstain = str(prompt.output.get("abstain_token", "INSUFFICIENT_CONTEXT"))
+            st.messages = prompt.render(
+                question=st.question,
+                sources=format_sources(st.sources),
+                history=self._history(st.ctx),
+                memory=format_memory(st.ctx),
             )
-            async for event in clarify():
-                yield event
-            return
-
-        # 6. Groundedness (optional): every claim must come from the cited sources.
-        if cfg.guardrails.output.groundedness_check and self.judge is not None:
-            gcfg = cfg.guardrails.groundedness
-            cited = {c.marker for c in citations}
-            judged: Judgement = await self.judge.judge(
-                answer, [s for i, s in enumerate(sources, start=1) if i in cited] or sources
-            )
-            usage = usage.add(priced(judged.usage, self.prices[gcfg.model_role]))
-            failed = judged.score < gcfg.min_score and not (
-                judged.error and gcfg.on_error == "allow"
-            )
-            if failed:
-                log.warning(
-                    "answer not grounded",
-                    extra={"score": round(judged.score, 3), "unsupported": len(judged.unsupported)},
-                )
-                if gcfg.on_fail == "warn":
-                    warnings = [*warnings, "groundedness:low"]
-                elif gcfg.on_fail == "refuse":
-                    await self._persist(ctx, question, REFUSAL_TEXT, "refuse")
-                    yield terminal(
-                        self._response(
-                            ctx, REFUSAL_TEXT, "refuse", usage, warnings=[*warnings, "groundedness"]
-                        )
-                    )
-                    return
+            async for kind, piece, u in self._generate(
+                self.answer_llm, st.messages, "answer", st.draft, abstain
+            ):
+                if kind == "delta":
+                    st.drafted += piece
+                    yield ChatEvent(event="delta", data={"text": piece})
                 else:
-                    async for event in clarify():
-                        yield event
-                    return
-
-        # 7. Output guards on the complete text, then persist and finish.
-        answer, blocked = await self._check_output(answer, messages)
-        if blocked:
-            await self._persist(ctx, question, answer, "refuse")
-            yield terminal(
-                self._response(ctx, answer, "refuse", usage, warnings=warnings + blocked)
+                    st.raw = piece
+                    st.usage = st.usage.add(priced(u or Usage(), self.prices["answer"]))
+            st.answer, st.citations = align(st.raw, st.sources)
+            s.set(
+                {
+                    "chatbot.answer.sources": len(st.sources),
+                    "chatbot.answer.citations": len(st.citations),
+                }
             )
+
+        # The model abstained, or cited nothing while citations are required: clarify.
+        if abstain in st.raw or (cfg.answer.citations == "required" and not st.citations):
+            log.info(
+                "answer rejected",
+                extra={"abstained": abstain in st.raw, "citations": len(st.citations)},
+            )
+            st.route = "clarify"
+        elif cfg.guardrails.output.groundedness_check and self.judge is not None:
+            st.route = "check_grounded"
+        else:
+            st.route = "check_output"
+
+    async def check_grounded(self, st: TurnState) -> None:
+        """Every claim must come from the cited sources (guardrails.output.groundedness_check)."""
+        gcfg = self.settings.guardrails.groundedness
+        cited = {c.marker for c in st.citations}
+        with span("groundedness", type="evaluator") as s:
+            judged: Judgement = await self.judge.judge(
+                st.answer,
+                [x for i, x in enumerate(st.sources, start=1) if i in cited] or st.sources,
+            )
+            s.set({"chatbot.groundedness.score": judged.score})
+        st.usage = st.usage.add(priced(judged.usage, self.prices[gcfg.model_role]))
+        failed = judged.score < gcfg.min_score and not (judged.error and gcfg.on_error == "allow")
+        st.route = "check_output"
+        if not failed:
             return
-        await self._persist(ctx, question, answer, "answer")
-        yield terminal(self._response(ctx, answer, "answer", usage, citations, warnings))
+        log.warning(
+            "answer not grounded",
+            extra={"score": round(judged.score, 3), "unsupported": len(judged.unsupported)},
+        )
+        if gcfg.on_fail == "warn":
+            st.warnings = [*st.warnings, "groundedness:low"]
+        elif gcfg.on_fail == "refuse":
+            await self._finish(st, REFUSAL_TEXT, "refuse", warnings=["groundedness"])
+        else:
+            st.route = "clarify"
+
+    async def check_output(self, st: TurnState) -> None:
+        """Output guards on the complete text, then persist and finish."""
+        answer, blocked = await self._check_output(st.answer, st.messages)
+        if blocked:
+            await self._finish(st, answer, "refuse", warnings=blocked)
+            return
+        await self._finish(st, answer, "answer", citations=st.citations)
+
+
+@registry.register("orchestrator", "simple")
+def make_simple(settings: Settings, **parts: Any) -> SimpleOrchestrator:
+    return SimpleOrchestrator(settings, **parts)

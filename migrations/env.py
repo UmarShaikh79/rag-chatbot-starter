@@ -3,7 +3,7 @@
 import os
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, pool, text
 
 config = context.config
 
@@ -23,6 +23,10 @@ def run_migrations_online() -> None:
     with engine.connect() as connection:
         context.configure(connection=connection, target_metadata=None)
         with context.begin_transaction():
+            # Several pods may run `chatbot migrate` at once (the Kubernetes example runs it
+            # as an init container): the first takes this lock and migrates, the others wait
+            # for it and then find nothing to do.
+            connection.execute(text("SELECT pg_advisory_xact_lock(7243155)"))
             context.run_migrations()
 
 

@@ -1,0 +1,55 @@
+# Re-sync the configured sources every night: `chatbot ingest` only enqueues the jobs
+# (unchanged documents are skipped by content hash); the worker does the work.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: chatbot-ingest
+  labels:
+    app.kubernetes.io/name: chatbot-ingest
+    app.kubernetes.io/component: ingest
+spec:
+  schedule: "0 3 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: chatbot-ingest
+        spec:
+          serviceAccountName: chatbot
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: ingest
+              image: chatbot
+              command: ["chatbot", "ingest"]
+              envFrom:
+                - configMapRef:
+                    name: chatbot-config
+                - secretRef:
+                    name: chatbot-secrets
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 256Mi}
+          volumes:
+            - name: tmp
+              emptyDir: {}

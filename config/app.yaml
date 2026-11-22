@@ -187,9 +187,28 @@ evals:                              # `chatbot eval` and `chatbot calibrate` (AD
     max_min_hits: 3                 # min_hits values tried: 1..3
     min_unanswerable: 5             # warn when the dataset has fewer unanswerable questions
 
-observability:
+observability:                      # docs/observability.md
   log_level: INFO
   log_format: json                  # json | text
   log_message_text: false           # never log user or model text unless you turn this on
+  otel:                             # OpenTelemetry traces + metrics over OTLP/HTTP (ADR 026)
+    enabled: false                  # needs `uv sync --extra otel`
+    service_name: null              # default app.name; OTEL_SERVICE_NAME wins
+    traces: true                    # where to: OTEL_EXPORTER_OTLP_ENDPOINT / _HEADERS
+    metrics: true
+    metrics_interval_s: 30
+    sample_ratio: 1.0               # share of traces kept (a parent's decision wins)
+    capture_text: false             # prompts, answers, chunks on spans (redacted text)
+    console: false                  # also print spans to stdout
+  langfuse:                         # Langfuse via its OTLP endpoint, no SDK (ADR 027)
+    enabled: false                  # needs `uv sync --extra langfuse`
+    base_url_env: LANGFUSE_BASE_URL # unset -> base_url
+    base_url: https://cloud.langfuse.com
+    public_key_env: LANGFUSE_PUBLIC_KEY
+    secret_key_env: LANGFUSE_SECRET_KEY
+    capture_text: true              # redacted text leaves your infrastructure: see ADR 027
+    send_user_id: true
+  usage:                            # token and cost accounting (ADR 028)
+    persist: true                   # a usage_records row per turn, job or CLI run; `chatbot usage`
 
-orchestrator: simple
+orchestrator: simple                # simple | langgraph (`uv sync --extra langgraph`, ADR 029)

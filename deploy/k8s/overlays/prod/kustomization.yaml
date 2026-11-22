@@ -1,0 +1,53 @@
+# A production starting point: managed Postgres (pgvector >= 0.8) outside the cluster,
+# secrets created separately, autoscaling, an ingress set up for SSE and a network policy.
+# Replace every YOUR_* value. See deploy/k8s/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: chatbot
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - hpa.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+
+# Tracing and metrics through an OpenTelemetry Collector in the namespace. Build the image
+# with the otel extra (docker build --build-arg UV_EXTRAS="--extra otel" ...).
+# components:
+#   - ../../components/otel-collector
+
+images:
+  - name: chatbot
+    newName: ghcr.io/YOUR_ORG/rag-chatbot-starter
+    newTag: "0.5.0"
+
+patches:
+  - target: {kind: Deployment, name: chatbot-api}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/topologySpreadConstraints
+        value:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: chatbot-api
+
+configMapGenerator:
+  - name: chatbot-config
+    behavior: merge
+    literals:
+      - CHATBOT_PROFILE=prod
+      # - CHATBOT__AUTH__MODE=api_key_or_jwt
+      # - CHATBOT__AUTH__JWT__ISSUER=https://YOUR_TENANT/
+      # - CHATBOT__AUTH__JWT__AUDIENCE=chatbot-api
+
+# The chatbot-secrets Secret is not generated here, so no secret lives in git. Create it
+# (or sync it with External Secrets / Sealed Secrets) before applying:
+#   kubectl -n chatbot create secret generic chatbot-secrets \
+#     --from-literal=DATABASE_URL='postgresql://...?sslmode=require' \
+#     --from-literal=OPENAI_API_KEY=sk-... \
+#     --from-literal=CHATBOT_API_KEYS=<hash from `chatbot hash-key`>

@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | [001](001-template-not-framework.md) | Template, not framework | Accepted |
 | [002](002-python-tooling.md) | Python tooling | Accepted |
-| [003](003-plain-python-orchestration.md) | Plain Python orchestration | Accepted |
+| [003](003-plain-python-orchestration.md) | Plain Python orchestration | Accepted (LangGraph adapter: ADR 029) |
 | [004](004-postgres-for-everything-first.md) | Postgres for everything first | Accepted |
 | [005](005-the-embedding-model-is-part-of-the-index.md) | The embedding model is part of the index | Accepted (re-index: ADR 023) |
 | [006](006-weak-retrieval-asks-never-invents.md) | Weak retrieval asks, never invents | Accepted |
@@ -27,3 +27,8 @@
 | [023](023-reindex-beside-the-live-index-then-switch.md) | Re-index beside the live index, then switch | Accepted (milestone 4) |
 | [024](024-qdrant-behind-the-store-interface-with-a-postgres-catalog.md) | Qdrant behind the store interface, with a Postgres catalog | Accepted (milestone 4) |
 | [025](025-local-models-through-ollamas-native-api.md) | Local models through Ollama's native API | Accepted (milestone 4) |
+| [026](026-tracing-and-metrics-through-a-small-facade-on-opentelemetry.md) | Tracing and metrics through a small facade on OpenTelemetry | Accepted (milestone 5) |
+| [027](027-langfuse-over-its-otlp-endpoint.md) | Langfuse over its OTLP endpoint | Accepted (milestone 5) |
+| [028](028-usage-records-per-operation.md) | Token and cost accounting with a usage record per operation | Accepted (milestone 5) |
+| [029](029-langgraph-as-an-optional-orchestrator-adapter.md) | LangGraph as an optional orchestrator adapter | Accepted (milestone 5) |
+| [030](030-kubernetes-example-with-kustomize.md) | A Kubernetes example with Kustomize | Accepted (milestone 5) |

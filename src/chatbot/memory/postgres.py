@@ -1,7 +1,8 @@
 """Conversation memory in Postgres: turns, rolling summaries and long-term user facts.
 
 Text arrives here already redacted (ADR 015). Summaries and facts are written by
-``chatbot.memory.manager`` (ADR 016). ``forget_user`` deletes every row tied to a user.
+``chatbot.memory.manager`` (ADR 016). ``forget_user`` deletes every row tied to a user
+and unlinks the user from usage records.
 """
 
 from __future__ import annotations
@@ -205,6 +206,12 @@ class PostgresMemoryStore:
                 ("conversations", "DELETE FROM conversations WHERE user_id = %s"),
                 ("jobs", "DELETE FROM jobs WHERE user_id = %s"),
                 ("documents", "DELETE FROM documents WHERE user_id = %s"),
+                # Accounting keeps the totals but no longer knows whose they were (ADR 028).
+                (
+                    "usage_records_anonymised",
+                    """UPDATE usage_records SET user_id = NULL, conversation_id = NULL
+                       WHERE user_id = %s""",
+                ),
             ]:
                 params = (user_id,) * sql.count("%s")
                 cur = await conn.execute(sql, params)

@@ -203,6 +203,36 @@ and `dims`), register it with `@registry.register("llm", "myprovider")`, and add
 example over plain HTTP. Any OpenAI-compatible server (vLLM, LM Studio, Azure OpenAI with a
 compatible endpoint) works with `provider: openai` and a `base_url`.
 
+Whatever provider you add is traced and priced without extra code: the container wraps every
+LLM and embedder it builds (`observability/instrument.py`). Set `price_per_mtok` in its profile
+to get costs.
+
+## Change the orchestration flow
+
+A chat turn is a list of steps on `SimpleOrchestrator` (`check_input`, `retrieve`, `answer`,
+`clarify`, `check_grounded`, `check_output`). Each reads and updates one `TurnState`
+(`orchestration/state.py`) and sets `state.route` to the next step. To change the flow:
+
+- **Change a step**: subclass `SimpleOrchestrator`, override the method, register the subclass
+  with `@registry.register("orchestrator", "mine")` in `chatbot.domain` and set
+  `orchestrator: mine`. Tracing, cost accounting and the SSE contract still apply.
+- **Add steps, loops or tools**: start from the LangGraph adapter
+  (`uv sync --extra langgraph`, `orchestrator: langgraph`, ADR 029). Subclass
+  `LangGraphOrchestrator` and change `build_graph()`: add a node (a tool call, a lookup in your
+  CRM), route to it from `answer` by setting `state.route`, and add an edge back. Nodes that
+  stream use `get_stream_writer()` to send delta events. `tests/unit/test_langgraph.py` adds a
+  node in a few lines.
+
+Keep the rule that exactly one terminal event ends a stream (ADR 014): set `state.response`
+through `_finish` and let `terminal()` build the event.
+
+## Add spans, metrics or a tracing backend
+
+`chatbot.observability.tracing` has `span`, `count` and `observe`; they are no-ops until a
+backend is on, so call them anywhere (see [observability.md](observability.md)). To send spans
+to another place, add an exporter in `build_otel` or, simpler, point
+`OTEL_EXPORTER_OTLP_ENDPOINT` at a Collector and configure it there.
+
 ## Add a vector store
 
 Subclass `chatbot.stores.catalog.CatalogStore`: it keeps aliases, documents, calibrations,
@@ -225,4 +255,6 @@ every prompt, so a missing variable fails in CI.
 ## Add a job kind
 
 Add a handler in `ingestion/jobs/handlers.py` and enqueue it with `queue.enqueue(kind, payload)`.
-Include `user_id` in the payload when the job holds user data so `forget_user` deletes it.
+Include `user_id` in the payload when the job holds user data so `forget_user` deletes it. The
+worker gives every job its own trace (`job:<kind>`) and usage record, attributed to the
+payload's `user_id`.

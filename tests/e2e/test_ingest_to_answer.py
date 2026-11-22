@@ -65,6 +65,12 @@ def test_ingest_then_ask_returns_cited_answer(app_client):
     assert sources["sources"][0]["documents"] == 8
     assert sources["index"]["calibrated"] is False
 
+    # Accounting (ADR 028): the chat turn is a usage record in Postgres. (The ingest ran in
+    # a bare Worker here, without a usage store, so it is not.)
+    usage = app_client.get("/v1/usage", params={"group_by": "operation"}).json()
+    assert {r["key"]: r["operations"] for r in usage["rows"]} == {"chat": 1}
+    assert usage["total"]["prompt_tokens"] == body["usage"]["prompt_tokens"]
+
 
 def test_second_sync_skips_unchanged_documents(app_client):
     ingest(app_client)

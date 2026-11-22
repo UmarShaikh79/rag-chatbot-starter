@@ -1,0 +1,30 @@
+# Only the ingress controller reaches the API; nothing reaches the worker. Egress is left
+# open (model providers, the database, your sources); tighten it if your cluster can.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chatbot-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: chatbot-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chatbot-no-ingress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [chatbot-worker, chatbot-ingest]
+  policyTypes: [Ingress]

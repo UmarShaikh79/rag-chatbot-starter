@@ -1,0 +1,31 @@
+# The chatbot itself: API, worker and a nightly source sync. No database and no
+# namespace here: overlays add those (dev runs Postgres in the cluster, prod points at a
+# managed one). See deploy/k8s/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: rag-chatbot
+    includeSelectors: false
+
+resources:
+  - serviceaccount.yaml
+  - api.yaml
+  - worker.yaml
+  - ingest-cronjob.yaml
+  - pdb.yaml
+
+images:
+  - name: chatbot            # replaced by each overlay (newName / newTag)
+    newTag: latest
+
+# Non-secret settings as environment variables. Any setting in config/app.yaml can be
+# overridden this way: CHATBOT__<SECTION>__<KEY>. Overlays merge their own values in.
+# Generated with a content hash in the name, so changing a value rolls the pods.
+# Secrets (DATABASE_URL, OPENAI_API_KEY, CHATBOT_API_KEYS, ...) live in chatbot-secrets.
+configMapGenerator:
+  - name: chatbot-config
+    literals:
+      - CHATBOT_PROFILE=prod
+      - CHATBOT__OBSERVABILITY__LOG_FORMAT=json

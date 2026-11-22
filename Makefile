@@ -3,7 +3,7 @@ API ?= http://localhost:8000
 Q ?= How long is the refund window for annual plans?
 TEST_DATABASE_URL ?= postgresql://chatbot:chatbot@localhost:5432/chatbot_test
 
-.PHONY: help install up up-ollama up-qdrant ollama-pull reindex index-list index-activate index-rollback down logs migrate ingest ask ask-stream api-key test test-unit test-db lint format check-config eval eval-retrieval calibrate calibrate-apply
+.PHONY: help install up up-ollama up-qdrant up-otel ollama-pull usage reindex index-list index-activate index-rollback down logs migrate ingest ask ask-stream api-key test test-unit test-db lint format check-config eval eval-retrieval calibrate calibrate-apply k8s-render
 
 help:          ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -23,6 +23,11 @@ up-qdrant:     ## same, plus Qdrant (builds the app with the qdrant extra)
 	UV_EXTRAS="--extra qdrant" $(COMPOSE) --profile qdrant up --build -d
 	@echo "Set CHATBOT__VECTOR_STORE__BACKEND=qdrant in .env, then: make reindex"
 
+up-otel:       ## same, plus an OpenTelemetry Collector and Jaeger (builds the app with the otel extra)
+	UV_EXTRAS="--extra otel" $(COMPOSE) --profile otel up --build -d
+	@echo "Set CHATBOT__OBSERVABILITY__OTEL__ENABLED=true in .env and run make up-otel again;"
+	@echo "traces: http://localhost:16686  metrics: http://localhost:8889/metrics"
+
 ollama-pull:   ## pull the models named in config/models.yaml into the Ollama container
 	$(COMPOSE) --profile ollama run --rm ollama-pull
 
@@ -39,7 +44,7 @@ index-rollback: ## switch the alias back to the previous index
 	$(COMPOSE) exec api chatbot index rollback
 
 down:          ## stop the stack
-	$(COMPOSE) --profile ollama --profile qdrant down
+	$(COMPOSE) --profile ollama --profile qdrant --profile otel down
 
 logs:          ## follow api and worker logs
 	$(COMPOSE) logs -f api worker
@@ -89,6 +94,13 @@ calibrate:     ## sweep min_score + min_hits on the golden set (dry run)
 
 calibrate-apply: ## same, and store the thresholds with the index (ADR 011)
 	uv run chatbot calibrate --apply
+
+usage:         ## tokens and cost of the last 30 days by day: make usage BY=user|model|operation
+	$(COMPOSE) exec api chatbot usage --by $(or $(BY),day)
+
+k8s-render:    ## render the Kubernetes example overlays (needs kubectl)
+	kubectl kustomize deploy/k8s/overlays/dev
+	kubectl kustomize deploy/k8s/overlays/prod
 
 check-config:  ## print the merged configuration
 	uv run chatbot check-config
