@@ -40,7 +40,9 @@ POST /v1/chat                       server span (HTTP method, route, status)
     ├── load memory                 turns, facts, summary size
     ├── chat gpt-…  (rewrite)       only with retrieval.query_rewrite
     ├── retrieve                    scorer, top_k, hits
-    │   └── embeddings text-embedding-3-small
+    │   ├── embeddings text-embedding-3-small
+    │   └── rerank                  only with retrieval.rerank: model, candidates, top_n, fallback
+    │       └── rerank rerank-v5.0-fast   Cohere: attempts, billed units
     ├── context guards              chunks dropped
     ├── answer                      sources, citations
     │   └── chat gpt-…              model, purpose, tokens, cost, time to first token
@@ -79,6 +81,8 @@ Querying Jaeger from a script: Jaeger 2.x serves its API under `/api/v3/...`
 | `chatbot.chat.duration` | histogram (s) | same |
 | `chatbot.retrieval.requests` | counter | `chatbot.retrieval.weak`, `chatbot.retrieval.gate` |
 | `chatbot.guard.blocks` | counter | `chatbot.guard.stage` (input, context, output) |
+| `chatbot.rerank.retries` | counter | `chatbot.rerank.reason` (`HTTP 429`, `ReadTimeout`, ...) |
+| `chatbot.rerank.fallbacks` | counter | turns answered from the retrieval order after a rerank failure |
 | `gen_ai.client.token.usage` | histogram | `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.token.type`, `chatbot.purpose` |
 | `gen_ai.client.operation.duration` | histogram (s) | same, plus `error.type` |
 | `chatbot.cost` | counter (USD) | `gen_ai.request.model`, `chatbot.purpose` (only priced models) |
@@ -88,7 +92,8 @@ Querying Jaeger from a script: Jaeger 2.x serves its API under `/api/v3/...`
 
 Useful alerts: the share of `chatbot.chat.turns` with `kind=clarify` rising (retrieval got
 worse, or users ask about something you have not ingested), `chatbot.guard.blocks` spiking,
-`chatbot.jobs` with `status=failed`, and `chatbot.cost` per hour.
+`chatbot.jobs` with `status=failed`, `chatbot.rerank.fallbacks` above zero (the reranker is
+rate-limited or down), and `chatbot.cost` per hour.
 
 ## Sending traces somewhere
 

@@ -1,5 +1,9 @@
 """What ``chatbot eval`` and ``chatbot calibrate`` do, as functions you can call from tests
-or your own scripts with any set of components."""
+or your own scripts with any set of components.
+
+Both run with ``patient_reranking()``: a hosted reranker's rate limits are waited out, and a
+rerank failure fails the run instead of falling back, so neither measures nor calibrates
+the rerank scorer on retrieval scores."""
 
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from chatbot.core.types import Calibration
 from chatbot.evals.calibrate import CalibrationResult, sweep
 from chatbot.evals.dataset import dataset_fingerprint, load_dataset
 from chatbot.evals.runner import EvalReport, run_answers, run_retrieval, summarize
+from chatbot.providers.rerankers import patient_reranking
 
 
 def _dataset_path(c: Components, dataset: str | None) -> Path:
@@ -40,14 +45,15 @@ async def evaluate(
     if index is None:
         raise ChatbotError("the index is empty: run `chatbot ingest` before `chatbot eval`")
     texts: dict[str, str] = {}
-    retrieval = await run_retrieval(
-        c.retriever, items, cfg.retrieval.top_k, cfg.evals.concurrency, texts
-    )
     answers = []
-    if not retrieval_only:
-        answers = await run_answers(
-            c.orchestrator, faithfulness_judge(c), items, cfg.evals.concurrency, texts
+    with patient_reranking():
+        retrieval = await run_retrieval(
+            c.retriever, items, cfg.retrieval.top_k, cfg.evals.concurrency, texts
         )
+        if not retrieval_only:
+            answers = await run_answers(
+                c.orchestrator, faithfulness_judge(c), items, cfg.evals.concurrency, texts
+            )
     calibration = None
     if hasattr(c.retriever, "calibration"):
         calibration = await c.retriever.calibration(index)
@@ -76,7 +82,8 @@ async def calibrate(
     index = await c.retriever.index() if hasattr(c.retriever, "index") else None
     if index is None:
         raise ChatbotError("the index is empty: run `chatbot ingest` before `chatbot calibrate`")
-    rows = await run_retrieval(c.retriever, items, cfg.retrieval.top_k, cfg.evals.concurrency)
+    with patient_reranking():
+        rows = await run_retrieval(c.retriever, items, cfg.retrieval.top_k, cfg.evals.concurrency)
     opts = cfg.evals.calibration
     result = sweep(
         rows,

@@ -111,6 +111,7 @@ retrieval:
     enabled: false
     model: cohere:rerank       # a name under rerankers in config/models.yaml
     candidates: 20                  # retrieved hits handed to the reranker; top_k are kept
+    fallback: true                  # reranker down or rate-limited: answer from retrieval order
   gate: auto                        # score min_score applies to: auto | dense | bm25 | rerank
   min_score: 0.35                   # provisional until `chatbot calibrate` (ADR 011, ADR 021)
   min_hits: 1                       # always paired with min_score

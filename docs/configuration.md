@@ -110,6 +110,7 @@ any of these changes the chunker version, so the next sync re-chunks every docum
 | `query_rewrite.enabled` | false | Rewrite follow-ups into standalone queries (`rewrite_query/v1`). Only retrieval sees the rewrite. |
 | `query_rewrite.only_with_history` | true | Skip the call on a conversation's first message. |
 | `rerank.enabled` | false | Re-score `rerank.candidates` (20) hits with `rerank.model`. |
+| `rerank.fallback` | true | When the reranker fails after its retries (rate limit, outage, bad key), answer from the retrieval order, gated by the retriever's own calibration, with the warning `rerank_unavailable`. `false`: the request fails. |
 | `rerank.model` | `cohere:rerank` | A name under `rerankers` in `config/models.yaml`: `cohere:rerank` (`COHERE_API_KEY`), `local:bge-reranker-base` (`uv sync --extra rerank`), `lexical:overlap` (tests). |
 | `gate` | `auto` | The score `min_score` applies to: `rerank` when reranking, else `dense`, else `bm25`. Never the fused RRF score. |
 | `min_score` / `min_hits` | 0.35 / 1 | Provisional, always applied together (ADR 011). |
@@ -120,6 +121,15 @@ Calibrated thresholds are stored per index and **scorer** (the gate plus the pip
 `dense|hybrid(dense,bm25)`; ADR 021). Change the strategy, HyDE or the reranker and the API
 logs that thresholds are provisional until you run `chatbot calibrate --apply` again.
 `GET /v1/sources` shows the active scorer and whether it is calibrated.
+
+Hosted rerankers can be rate-limited. Cohere retries 429, 5xx, timeouts and connection errors:
+twice within about 1.5 s in a chat turn (then `rerank.fallback` applies), and with backoff for
+up to about 3 minutes in `chatbot calibrate` and `chatbot eval`, which never fall back. A Cohere
+trial key allows 10 rerank calls a minute, so calibrating on the 34-question golden set takes a
+few minutes, and a chat service on a trial key falls back whenever traffic passes 10 turns a
+minute; use a production key for real traffic. Keep the retriever calibrated too (run
+`chatbot calibrate --apply` once with `rerank.enabled: false`): a fallback turn is gated with
+that calibration.
 
 ### `answer`
 

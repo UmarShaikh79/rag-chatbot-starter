@@ -331,3 +331,34 @@ def test_fastapi_telemetry_skips_probes_and_counts_requests_once(global_otel, fa
                     routes |= {p.attributes.get("http.route") for p in m.data.data_points}
     assert scopes == {"chatbot"}  # recorded once, by TraceMiddleware
     assert routes == {"/v1/chat"}  # probes are not metered
+
+
+async def test_rerank_is_its_own_span_and_a_fallback_is_marked(otel):
+    from chatbot.providers.rerankers import RerankError
+
+    exporter = otel.exporter
+    c = await build(retrieval={"rerank": {"enabled": True, "model": "lexical:overlap"}})
+    exporter.clear()
+    await c.orchestrator.run(ChatRequest(message=QUESTION))
+    rerank = spans_by_name(exporter)["rerank"]
+    assert rerank.attributes["chatbot.rerank.model"] == "rerank[lexical-v1]"
+    attrs = rerank.attributes
+    assert attrs["chatbot.rerank.candidates"] >= attrs["chatbot.rerank.top_n"]
+    assert rerank.parent.span_id == spans_by_name(exporter)["retrieve"].context.span_id
+
+    class Broken:
+        signature = "rerank[broken]"
+
+        async def rerank(self, query, hits, top_n):
+            raise RerankError("HTTP 429")
+
+    c.retriever.reranker = Broken()
+    exporter.clear()
+    resp = await c.orchestrator.run(ChatRequest(message=QUESTION))
+    spans = spans_by_name(exporter)
+    assert spans["rerank"].attributes["chatbot.rerank.fallback"] is True
+    assert spans["rerank"].status.status_code.name == "ERROR"
+    assert spans["retrieve"].attributes["chatbot.retrieval.scorer"] == "dense|dense"
+    assert "rerank_unavailable" in resp.warnings
+    points = metric_points(otel.reader)
+    assert sum(p.value for p in points["chatbot.rerank.fallbacks"]) == 1

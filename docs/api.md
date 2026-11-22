@@ -54,7 +54,7 @@ Response (`ChatResponse`):
 | `conversation_id` | Pass it back to continue the conversation |
 | `trace_id` | Same as the `X-Trace-Id` header; search logs by it |
 | `usage` | `prompt_tokens`, `completion_tokens`, `embedding_tokens`, `cost_usd` (null unless prices are set) |
-| `warnings` | e.g. `pii:EMAIL` when the question was redacted before use, `injection:override_instructions` or `prompt_leak` with a refusal |
+| `warnings` | e.g. `pii:EMAIL` when the question was redacted before use, `injection:override_instructions` or `prompt_leak` with a refusal, `rerank_unavailable` when the reranker failed and retrieval order was used |
 
 Filters: `document_id` (string or list) matches documents; every other key must equal the
 chunk metadata value (`source`, `title`, `heading`, `page`, `uri`, or any metadata you attached

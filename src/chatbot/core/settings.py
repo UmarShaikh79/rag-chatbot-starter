@@ -218,6 +218,10 @@ class RerankOptions(Strict):
     enabled: bool = False
     model: str = "cohere:rerank"  # a name under rerankers in config/models.yaml
     candidates: int = Field(20, ge=1, le=200)  # retrieved hits handed to the reranker
+    # When the reranker fails (rate limit, outage) after its retries: answer from the
+    # retrieval order, gated by the retriever's own calibration, and add the warning
+    # "rerank_unavailable". false: the request fails instead.
+    fallback: bool = True
 
 
 class RetrievalSection(Strict):
@@ -241,10 +245,12 @@ class RetrievalSection(Strict):
     def retriever_names(self) -> list[str]:
         return list(self.hybrid.retrievers) if self.strategy == "hybrid" else [self.strategy]
 
-    def gate_signal(self) -> str:
-        if self.gate != "auto":
+    def gate_signal(self, rerank: bool | None = None) -> str:
+        """The gated score. ``rerank=False``: the gate when reranking is off or has failed."""
+        rerank = self.rerank.enabled if rerank is None else rerank
+        if self.gate != "auto" and (rerank or self.gate != "rerank"):
             return self.gate
-        if self.rerank.enabled:
+        if rerank:
             return "rerank"
         names = self.retriever_names()
         return "dense" if "dense" in names or len(names) > 1 else names[0]

@@ -5,6 +5,22 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: a reranker failure took every chat request down. With a Cohere trial key (10 calls a
+  minute) or during a Cohere outage, `/v1/chat` answered 500 for everyone. Now:
+  - the Cohere reranker retries 429, 5xx, timeouts and connection errors (twice within about
+    1.5 s in a chat turn; it never retried before) and respects `Retry-After`;
+  - if it still fails, the turn is answered from the retrieval order, gated by the retriever's
+    own calibration, with the warning `rerank_unavailable` (new setting
+    `retrieval.rerank.fallback`, default true; `false` keeps the old failure);
+  - `chatbot calibrate` and `chatbot eval` back off for up to about 3 minutes and never fall
+    back, so they finish on a trial key instead of aborting with a traceback;
+  - reranking has its own `rerank` span (model, candidates, fallback), the Cohere call a child
+    span with attempts and billed units, and new metrics `chatbot.rerank.retries` and
+    `chatbot.rerank.fallbacks`.
+  In a copy you have modified: take `providers/rerankers/`, `RetrievalPipeline.retrieve` and
+  `used()`, the `used` lines in `SimpleOrchestrator.retrieve`, `gate_signal(rerank=...)` and the
+  `patient_reranking()` blocks in `evals/commands.py`. A custom reranker gets the fallback for
+  free; raise any exception to trigger it.
 - Fix: the Kubernetes prod overlay's ingress host placeholder `chatbot.YOUR_DOMAIN` is not a
   valid host name, so `kubectl apply -k deploy/k8s/overlays/prod --dry-run=server` (the
   README's own check) always failed; kubeconform in CI does not check host values. The
