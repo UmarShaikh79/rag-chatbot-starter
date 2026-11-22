@@ -5,6 +5,11 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- README rewritten for first-time readers: real answers from the sample corpus (with citations,
+  a clarifying question, PII redaction, an injection refusal, streaming), a zero-key quick start
+  checked against `.env.example`, a feature overview, measured quality per setup, a diagram of
+  the flow, use cases beyond support bots, client examples (curl, Python, browser streaming) and
+  a docs map by goal.
 - Readability pass for a mixed audience (no behaviour change): dense one-liners unfolded into
   named steps (the API-key versus JWT routing in `auth/api_key.py`, mixed `and`/`or`
   conditions, two nested conditional expressions, comprehensions with several loops); long
