@@ -1,8 +1,9 @@
 """The default orchestrator: plain async Python, one readable function per step.
 
 Flow per turn:
-  input guards -> load history -> retrieve -> context guard -> weak? -> clarify | answer
-  -> citation alignment -> output guards -> persist (redacted) -> terminal event
+  input guards -> load history, summary and user facts -> retrieve -> context guard
+  -> weak? -> clarify | answer -> citation alignment -> output guards (on the complete text,
+  in every mode) -> persist (redacted) -> schedule memory refresh -> terminal event
 
 ``stream`` and ``run`` share one implementation. In draft_then_final mode, delta events
 carry draft text through a PII-safe rolling buffer and exactly one terminal event follows
@@ -30,8 +31,9 @@ from chatbot.core.types import (
     Turn,
     Usage,
 )
-from chatbot.guardrails.pii import StreamRedactor, redact
+from chatbot.guardrails.pii import StreamRedactor
 from chatbot.guardrails.pipeline import GuardPipeline
+from chatbot.memory.manager import MemoryManager, format_memory
 from chatbot.observability.logging import get_trace_id
 from chatbot.observability.usage import priced
 from chatbot.orchestration.citations import align, format_sources
@@ -54,6 +56,7 @@ class SimpleOrchestrator:
         memory: MemoryStore,
         guards: GuardPipeline,
         prompts: PromptRegistry,
+        memory_manager: MemoryManager | None = None,
     ) -> None:
         self.settings = settings
         self.answer_llm = answer_llm
@@ -62,6 +65,7 @@ class SimpleOrchestrator:
         self.memory = memory
         self.guards = guards
         self.prompts = prompts
+        self.memory_manager = memory_manager
         self.prices = {
             "answer": settings.llm_profile("answer").price_per_mtok,
             "cheap": settings.llm_profile("cheap").price_per_mtok,
@@ -120,8 +124,8 @@ class SimpleOrchestrator:
         self, ctx: ConversationContext, question: str, answer: str, kind: str
     ) -> None:
         if self.settings.memory.redact_before_persist:
-            question, _ = redact(question)
-            answer, _ = redact(answer)
+            question, _ = self.guards.redactor.redact(question)
+            answer, _ = self.guards.redactor.redact(answer)
         await self.memory.save_turns(
             ctx,
             [
@@ -129,6 +133,17 @@ class SimpleOrchestrator:
                 Turn(role="assistant", content=answer, metadata={"kind": kind}),
             ],
         )
+        if self.memory_manager is not None and kind != "refuse":
+            await self.memory_manager.after_turn(ctx)
+
+    async def _check_output(self, text: str, messages: list[Message]) -> tuple[str, list[str]]:
+        """Output guards on the complete text. Returns (text, block reasons)."""
+        system = next((m.content for m in messages if m.role == "system"), "")
+        result = await self.guards.run("output", text, {"system_prompt": system})
+        if result.action == "block":
+            log.warning("output blocked", extra={"reasons": result.reasons})
+            return REFUSAL_TEXT, result.reasons
+        return result.text, []
 
     async def _generate(
         self, llm: LLM, messages: list[Message], purpose: str, draft: bool, hold_prefix: str = ""
@@ -138,7 +153,9 @@ class SimpleOrchestrator:
             completion = await llm.generate(messages, purpose=purpose)
             yield "done", completion.text, completion.usage
             return
-        redactor = StreamRedactor(self.settings.guardrails.stream_holdback_chars)
+        redactor = StreamRedactor(
+            self.settings.guardrails.stream_holdback_chars, self.guards.redactor
+        )
         full, usage, holding = "", None, bool(hold_prefix)
         async for delta in llm.stream(messages, purpose=purpose):
             if delta.usage is not None:
@@ -184,7 +201,10 @@ class SimpleOrchestrator:
 
         # 1. Input guards (length, injection, PII).
         checked = await self.guards.run("input", req.message)
-        ctx = await self.memory.load(req.user_id, req.conversation_id, cfg.memory.history_turns)
+        facts_limit = self.memory_manager.facts_in_prompt if self.memory_manager else 0
+        ctx = await self.memory.load(
+            req.user_id, req.conversation_id, cfg.memory.history_turns, facts_limit
+        )
         if checked.action == "block":
             log.info("input blocked", extra={"reasons": checked.reasons})
             text = TOO_LONG_TEXT if "too_long" in checked.reasons else REFUSAL_TEXT
@@ -244,6 +264,7 @@ class SimpleOrchestrator:
             messages = prompt.render(
                 question=question,
                 history=self._history(ctx),
+                memory=format_memory(ctx),
                 topics=", ".join(topics[:5]) or "(none)",
             )
             text = ""
@@ -254,9 +275,10 @@ class SimpleOrchestrator:
                 else:
                     text = piece
                     usage = usage.add(priced(u or Usage(), self.prices["cheap"]))
-            text = (await self.guards.run("output", text)).text.strip()
-            await self._persist(ctx, question, text, "clarify")
-            yield terminal(self._response(ctx, text, "clarify", usage, warnings=warnings))
+            text, blocked = await self._check_output(text.strip(), messages)
+            kind: ResponseKind = "refuse" if blocked else "clarify"
+            await self._persist(ctx, question, text, kind)
+            yield terminal(self._response(ctx, text, kind, usage, warnings=warnings + blocked))
 
         if verdict.weak:
             async for event in clarify():
@@ -268,7 +290,10 @@ class SimpleOrchestrator:
         prompt = self.prompts.get(cfg.answer.prompt)
         abstain = str(prompt.output.get("abstain_token", "INSUFFICIENT_CONTEXT"))
         messages = prompt.render(
-            question=question, sources=format_sources(sources), history=self._history(ctx)
+            question=question,
+            sources=format_sources(sources),
+            history=self._history(ctx),
+            memory=format_memory(ctx),
         )
         raw = ""
         async for kind, piece, u in self._generate(
@@ -292,6 +317,12 @@ class SimpleOrchestrator:
             return
 
         # 6. Output guards on the complete text, then persist and finish.
-        answer = (await self.guards.run("output", answer)).text
+        answer, blocked = await self._check_output(answer, messages)
+        if blocked:
+            await self._persist(ctx, question, answer, "refuse")
+            yield terminal(
+                self._response(ctx, answer, "refuse", usage, warnings=warnings + blocked)
+            )
+            return
         await self._persist(ctx, question, answer, "answer")
         yield terminal(self._response(ctx, answer, "answer", usage, citations, warnings))

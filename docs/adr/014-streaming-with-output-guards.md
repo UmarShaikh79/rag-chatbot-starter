@@ -16,4 +16,4 @@ Fast first tokens without ever presenting unchecked text as final.
 
 ## Consequences
 
-Clients must handle `replace`. See docs/api.md for the contract and a client sketch.
+Clients must handle `replace`. See docs/api.md for the contract and a client sketch. Since milestone 2 the output guards on the complete text can also block it (prompt leak, ADR 018); the stream then ends with `refusal` even though deltas were sent, so clients must clear the draft on `refusal` too.

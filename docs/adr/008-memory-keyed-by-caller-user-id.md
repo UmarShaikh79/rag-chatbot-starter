@@ -16,4 +16,4 @@ Works for a small app or a large one without owning identity.
 
 ## Consequences
 
-The calling app is responsible for user ID integrity; JWT `sub` can supply it once JWT auth lands (milestone 2).
+With API keys the calling app is responsible for user ID integrity. With JWT auth (ADR 017) the token's `sub` is the user ID and clients cannot pick another. Summaries and long-term facts build on this key (ADR 016).

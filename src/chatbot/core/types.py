@@ -163,12 +163,35 @@ class Turn(BaseModel):
     content: str
     created_at: datetime | None = None
     metadata: dict[str, Any] = {}
+    id: int | None = None  # set by the store; increases within a conversation
+
+
+class UserFact(BaseModel):
+    """Something worth remembering about a user across conversations. Stored redacted."""
+
+    id: int
+    fact: str
+    source_conversation_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class MemoryState(BaseModel):
+    """Per-conversation memory bookkeeping: the rolling summary and how far each job got."""
+
+    conversation_id: str
+    user_id: str | None = None
+    summary: str = ""
+    summarized_until: int = 0  # last turn id folded into the summary
+    facts_until: int = 0  # last turn id that fact extraction has read
 
 
 class ConversationContext(BaseModel):
     conversation_id: str
     user_id: str | None = None
     history: list[Turn] = []
+    summary: str = ""  # rolling summary of turns older than the history window
+    facts: list[UserFact] = []  # long-term facts for user_id, most recently seen first
     is_new: bool = False
 
 
@@ -182,7 +205,14 @@ class DeletionReport(BaseModel):
 
 class GuardPayload(BaseModel):
     text: str
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}  # e.g. {"system_prompt": ...} for the output stage
+
+
+class PiiSpan(BaseModel):
+    start: int
+    end: int
+    label: str  # EMAIL, PHONE, PERSON, ...
+    score: float = 1.0
 
 
 class GuardResult(BaseModel):

@@ -16,7 +16,7 @@ migrations/  Alembic (raw SQL)     samples/docs/  demo corpus     evals/  golden
 tests/       unit, integration (Postgres), e2e   docker/  Dockerfile + Compose   docs/  guides + ADRs
 ```
 
-## What milestone 1 includes
+## What is included
 
 | Area | Default | Switch with |
 | --- | --- | --- |
@@ -28,14 +28,13 @@ tests/       unit, integration (Postgres), e2e   docker/  Dockerfile + Compose  
 | Retrieval | Dense, `top_k: 8`, `min_score` + `min_hits` | `retrieval.*` |
 | Weak retrieval | Clarifying question, never an invented answer | `answer.on_weak_retrieval` |
 | Streaming | `draft_then_final` (deltas, then one terminal event) | `answer.stream_mode: buffered` |
-| Safety | Injection checks and PII redaction on by default | `guardrails.*` |
-| Memory | Conversation history per caller `user_id`, redacted before storage; full per-user deletion | `memory.*` |
-| Auth | API keys (hashed) | `auth.mode` |
+| Safety | Injection checks (normalised heuristics; optional model classifier), PII redaction (regex; optional Presidio), prompt-leak check, all on the final text too | `guardrails.*` |
+| Memory | History per caller `user_id`, rolling summaries, long-term user facts; redacted before storage; full per-user deletion | `memory.*` |
+| Auth | API keys (hashed), JWT/OIDC bearer tokens, or both | `auth.mode` |
 | Observability | JSON logs with a trace ID per request; token counts (and cost, if prices are set) in every response | `observability.*` |
 
 Later milestones add BM25/hybrid/HyDE/rerank and the eval gate (M3), Ollama, Qdrant and
-re-index with alias flip (M4), summaries, long-term memory and JWT (M2), and OpenTelemetry,
-Langfuse, LangGraph and Kubernetes (M5). See [docs/roadmap.md](docs/roadmap.md).
+re-index with alias flip (M4), and OpenTelemetry, Langfuse, LangGraph and Kubernetes (M5). See [docs/roadmap.md](docs/roadmap.md).
 
 ## Quickstart (Docker)
 
@@ -90,7 +89,9 @@ curl -s localhost:8000/v1/chat -H "X-API-Key: $KEY" -H "Content-Type: applicatio
 curl -s localhost:8000/v1/ingest -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"source": "crm", "documents": [{"id": "42", "title": "Order 42", "text": "Order 42 ships Friday."}]}'
 
-# Forget a user (turns, conversations, queued jobs, documents they own)
+# See what is remembered about a user, then forget everything
+# (facts, summaries, turns, conversations, queued jobs, documents they own)
+curl -s localhost:8000/v1/users/customer-42/memory -H "X-API-Key: $KEY"
 curl -s -X DELETE localhost:8000/v1/users/customer-42/memory -H "X-API-Key: $KEY"
 ```
 
@@ -99,7 +100,7 @@ Endpoints and the SSE event contract: [docs/api.md](docs/api.md).
 ## Tests
 
 ```bash
-make test-unit       # ~80 fast tests, no database
+make test-unit       # ~130 fast tests, no database
 make test-db         # integration + end-to-end against Postgres (TEST_DATABASE_URL)
 make lint
 ```
@@ -112,7 +113,7 @@ profile. `tests/e2e/test_live_openai.py` runs against OpenAI when `OPENAI_API_KE
 
 - [Configuration reference](docs/configuration.md)
 - [HTTP API and streaming contract](docs/api.md)
-- [Extending: add a source, parser, retriever, guard or provider](docs/extending.md)
+- [Extending: add a source, parser, retriever, detector, guard or provider](docs/extending.md)
 - [Roadmap](docs/roadmap.md)
 - [Architecture decision records](docs/adr/README.md)
 

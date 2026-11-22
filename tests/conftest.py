@@ -84,7 +84,8 @@ async def db(pg_pool):
         for row in await cur.fetchall():
             await conn.execute(f'DROP INDEX IF EXISTS "{row["indexname"]}"')
         await conn.execute(
-            "TRUNCATE turns, conversations, jobs, chunks, documents, index_aliases, "
+            "TRUNCATE user_facts, conversation_summaries, turns, conversations, jobs, chunks, "
+            "documents, index_aliases, "
             "vector_indexes RESTART IDENTITY CASCADE"
         )
     return pg_pool

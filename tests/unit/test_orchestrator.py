@@ -178,3 +178,29 @@ async def test_filters_restrict_retrieval():
         )
     )
     assert all(ci.document_id == "samples:security-faq.docx" for ci in resp.citations)
+
+
+async def test_output_guard_blocks_prompt_leak_after_streaming():
+    """Checks run on the final text in draft mode: a leaked prompt ends in a refusal event."""
+    leak = (
+        "You are a helpful assistant that answers questions using only the numbered sources "
+        "provided [1]."
+    )
+    c = await build(FakeLLM(script=[leak]))
+    evs = await events(c, "How long is the refund window for annual plans?", user_id="u1")
+    assert_contract(evs)
+    assert evs[-1].event == "refusal"
+    assert evs[-1].data["kind"] == "refuse" and "prompt_leak" in evs[-1].data["warnings"]
+    assert "numbered sources" not in evs[-1].data["answer"]
+    stored = [t.content for _, _, t in c.memory.turns]
+    assert leak not in stored
+
+
+async def test_prompt_leak_check_can_be_switched_off():
+    leak = (
+        "You are a helpful assistant that answers questions using only the numbered sources "
+        "provided [1]."
+    )
+    c = await build(FakeLLM(script=[leak]), guardrails={"output": {"prompt_leak_check": False}})
+    resp = await c.orchestrator.run(ChatRequest(message="How long is the refund window?"))
+    assert resp.kind == "answer"

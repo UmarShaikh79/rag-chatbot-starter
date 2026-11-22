@@ -1,7 +1,10 @@
 # HTTP API
 
-All `/v1` routes need an API key (`X-API-Key` or `Authorization: Bearer`) unless
-`auth.mode: none`. Interactive docs are served at `/docs`.
+All `/v1` routes need credentials unless `auth.mode: none`: an API key (`X-API-Key` or
+`Authorization: Bearer <key>`) or, in the JWT modes, a token (`Authorization: Bearer <jwt>`).
+API keys can call every route for any user. A JWT end user always acts as the token's subject
+and can only use chat and their own memory routes; ingestion, jobs, sources and documents need
+an API key or the admin scope. Interactive docs are served at `/docs`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -11,18 +14,20 @@ All `/v1` routes need an API key (`X-API-Key` or `Authorization: Bearer`) unless
 | GET | `/v1/jobs/{id}` | Job status and result report |
 | GET | `/v1/sources` | Configured sources, inline sources, document and chunk counts, index info |
 | DELETE | `/v1/documents/{document_id}` | Remove one document and its chunks |
+| GET | `/v1/users/{user_id}/memory` | Long-term facts remembered about the user, most recent first |
+| DELETE | `/v1/users/{user_id}/memory/facts/{fact_id}` | Forget one fact (204) |
 | DELETE | `/v1/users/{user_id}/memory` | Delete everything stored for a user; returns counts per table |
 
-Errors return `{"detail": "...", "trace_id": "..."}`: 401 bad key, 403 conversation owned by
-another user, 404 unknown source/job/document, 409 index built with a different embedding
-model, 422 invalid body.
+Errors return `{"detail": "...", "trace_id": "..."}`: 401 bad key or token, 403 conversation
+owned by another user (or a JWT user reaching for another user or an admin route), 404 unknown
+source/job/document/fact, 409 index built with a different embedding model, 422 invalid body.
 
 ## POST /v1/chat
 
 ```json
 {
   "message": "How long is the refund window?",
-  "user_id": "customer-42",          // optional; your app's ID for the end user
+  "user_id": "customer-42",          // optional; your app's ID for the end user (JWT: the token's sub)
   "conversation_id": null,           // omit to start a conversation; reuse the returned one
   "filters": {"source": "samples"},  // optional; metadata containment, plus document_id
   "stream": false
@@ -35,11 +40,11 @@ Response (`ChatResponse`):
 | --- | --- |
 | `answer` | Text. For `kind: answer` it contains `[n]` markers. |
 | `citations` | `[{marker, chunk_id, document_id, title, uri, score, snippet}]` for each marker used |
-| `kind` | `answer`, `clarify` (retrieval was weak or the model abstained; `answer` is a question back to the user) or `refuse` (blocked by a guard) |
+| `kind` | `answer`, `clarify` (retrieval was weak or the model abstained; `answer` is a question back to the user) or `refuse` (blocked by an input or output guard) |
 | `conversation_id` | Pass it back to continue the conversation |
 | `trace_id` | Same as the `X-Trace-Id` header; search logs by it |
 | `usage` | `prompt_tokens`, `completion_tokens`, `embedding_tokens`, `cost_usd` (null unless prices are set) |
-| `warnings` | e.g. `pii:EMAIL` when the question was redacted before use |
+| `warnings` | e.g. `pii:EMAIL` when the question was redacted before use, `injection:override_instructions` or `prompt_leak` with a refusal |
 
 Filters: `document_id` (string or list) matches documents; every other key must equal the
 chunk metadata value (`source`, `title`, `heading`, `page`, `uri`, or any metadata you attached
@@ -54,7 +59,7 @@ With `stream: true` the response is `text/event-stream`. Events:
 | `delta` | `{"text": "..."}` | Draft text, already PII-redacted. Zero or more. |
 | `final` | `ChatResponse` fields | The drafts concatenate to `answer`. Ends the stream. |
 | `replace` | `ChatResponse` fields | A guard or citation check changed the text. **Replace the draft** with `answer`. Ends the stream. |
-| `refusal` | `ChatResponse` fields, `kind: refuse` | The request was blocked. Ends the stream. |
+| `refusal` | `ChatResponse` fields, `kind: refuse` | The request or the finished answer was blocked. **Discard any draft.** Ends the stream. |
 | `error` | `{"message", "trace_id"}` | Something failed. Ends the stream. |
 
 Exactly one of `final`, `replace`, `refusal`, `error` ends every stream. Treat deltas as a
@@ -117,3 +122,26 @@ label, so `{"source": "crm", "documents": [{"id": "42"}]}` becomes `crm:42`:
 Both return `202 {"job_id", "status_url"}`. The worker picks the job up; `GET /v1/jobs/{id}`
 returns `status` (`queued`, `running`, `succeeded`, `failed`), `attempts`, `last_error` and a
 `result` report (`indexed`, `unchanged`, `removed`, `failed`, `chunks`, `usage`).
+
+## Memory
+
+With a `user_id` (or a JWT), each turn feeds two kinds of memory (ADR 016): a rolling summary of
+the conversation's older turns and long-term facts about the user ("The user is on the Team
+plan"), both redacted before storage. They are refreshed by the worker after each turn.
+
+`GET /v1/users/{user_id}/memory`:
+
+```json
+{"user_id": "customer-42",
+ "facts": [{"id": 7, "fact": "The user is on the Team plan.", "source_conversation_id": "9f...",
+            "created_at": "...", "updated_at": "..."}]}
+```
+
+Show these to the user if you like; `DELETE /v1/users/{user_id}/memory/facts/7` removes one.
+`DELETE /v1/users/{user_id}/memory` removes everything and returns counts per table:
+
+```json
+{"user_id": "customer-42",
+ "deleted": {"user_facts": 3, "conversation_summaries": 1, "turns": 24, "conversations": 2,
+             "jobs": 0, "documents": 0}}
+```

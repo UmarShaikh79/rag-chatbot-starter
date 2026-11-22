@@ -88,34 +88,81 @@ def make(embedder, store, alias):
 Set `retrieval.strategy: dense_mmr`. Return `(hits, usage)` with `score` on a stable scale and
 recalibrate `min_score` for it (ADR 011).
 
+## Add a PII or injection detector
+
+Detectors are the easiest way to strengthen the guards (ADR 018). A PII detector returns spans;
+an injection detector returns reasons (empty when the text looks safe). Register one and list
+its name in config:
+
+```python
+# src/chatbot/domain/detectors.py
+import re
+
+from chatbot.core.registry import registry
+from chatbot.core.types import PiiSpan
+
+EMPLOYEE_ID = re.compile(r"\bEMP-\d{6}\b")
+
+
+class EmployeeIds:
+    name = "employee_ids"
+
+    def find(self, text):
+        return [
+            PiiSpan(start=m.start(), end=m.end(), label="EMPLOYEE_ID")
+            for m in EMPLOYEE_ID.finditer(text)
+        ]
+
+
+@registry.register("pii_detector", "employee_ids")
+def make_employee_ids(cfg):  # cfg is the guardrails section
+    return EmployeeIds()
+
+
+class HostedClassifier:
+    name = "hosted"
+
+    async def detect(self, text, stage):  # stage: "input" or "context"
+        flagged = await call_your_moderation_api(text)
+        return ["hosted"] if flagged else []
+
+
+@registry.register("injection_detector", "hosted")
+def make_hosted(cfg, llms, prompts):
+    return HostedClassifier()
+```
+
+```yaml
+guardrails:
+  pii: {detectors: [regex, employee_ids]}
+  injection: {detectors: [heuristic, hosted]}
+```
+
+The configured redactor is used everywhere PII is handled: input, output, the streaming
+redactor, persistence and memory.
+
 ## Add a guard
 
 Guards have `name`, `stage` (`input`, `context` or `output`) and `async check(payload)`
-returning `allow`, `modify` (with new text) or `block`. Add yours to
-`GuardPipeline.from_config` in `guardrails/pipeline.py`. For example, Microsoft Presidio for
-names and addresses:
+returning `allow`, `modify` (with new text) or `block`. `payload.metadata` carries
+`system_prompt` at the output stage. Add yours to `GuardPipeline.from_config` in
+`guardrails/pipeline.py`. A `block` at the output stage turns the answer into a refusal, also in
+streaming mode.
 
-```python
-from chatbot.core.types import GuardResult
-from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
+## Change how memory works
 
+`memory/manager.py` holds the summary and fact logic; the prompts are `prompts/summarize/v1.yaml`
+and `prompts/extract_facts/v1.yaml`. To use a memory service instead (Mem0, Zep, ...), replace
+`MemoryManager` with a class that has the same `after_turn`, `refresh` and `facts_in_prompt`
+members, pass it to `container.build(..., memory_manager=...)`, and keep `forget_user` deleting
+whatever it stores.
 
-class PresidioGuard:
-    name, stage = "presidio", "input"
+## Map identity-provider claims
 
-    def __init__(self):
-        self.analyzer, self.anonymizer = AnalyzerEngine(), AnonymizerEngine()
-
-    async def check(self, payload):
-        found = self.analyzer.analyze(text=payload.text, language="en")
-        if not found:
-            return GuardResult(action="allow", text=payload.text)
-        text = self.anonymizer.anonymize(text=payload.text, analyzer_results=found).text
-        return GuardResult(
-            action="modify", text=text, reasons=[f"pii:{r.entity_type}" for r in found]
-        )
-```
+`auth/jwt.py` turns a verified token into a `Principal` (`subject`, `scopes`, `admin`). If your
+provider puts permissions in another claim (`roles`, `groups`, `permissions`), extend
+`scopes_of` there. The principal is available in routes as
+`Depends(chatbot.auth.principal.current_principal)`.
 
 ## Add an LLM or embedding provider
 
@@ -126,7 +173,7 @@ Azure OpenAI with a compatible endpoint) works with `provider: openai` and a `ba
 
 ## Change prompts
 
-Copy `prompts/answer/v1.yaml` to `v2.yaml`, edit, and set `answer.prompt: answer/v2`. Keep the
+Copy `prompts/answer/v2.yaml` to `v3.yaml`, edit, and set `answer.prompt: answer/v3`. Keep the
 `[n]` citation instruction and the abstain token unless you also change
 `orchestration/citations.py` and the orchestrator. `tests/unit/test_registry_prompts.py` renders
 every prompt, so a missing variable fails in CI.

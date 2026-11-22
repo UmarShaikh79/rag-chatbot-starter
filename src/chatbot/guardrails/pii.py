@@ -1,17 +1,22 @@
-"""Heuristic PII redaction (on by default) and a streaming redactor.
+"""PII redaction (on by default): detectors, a redactor that merges them, and a streaming
+redactor.
 
-Regexes catch common, well-formed identifiers: emails, phone numbers, payment card
-numbers (Luhn-checked), IBANs, US SSNs and IPv4 addresses. They will miss names and
-addresses. For stronger coverage plug Microsoft Presidio or a model-based detector in
-behind the same ``Guard`` protocol.
+The built-in ``regex`` detector catches common, well-formed identifiers: emails, phone
+numbers, payment card numbers (Luhn-checked), IBANs, US SSNs and IPv4 addresses. It misses
+names and street addresses; add the ``presidio`` detector (guardrails.pii.detectors) for
+those, or register your own ``pii_detector``.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from chatbot.core.types import GuardPayload, GuardResult
+from chatbot.core.interfaces import PiiDetector
+from chatbot.core.registry import registry
+from chatbot.core.settings import GuardrailsSection
+from chatbot.core.types import GuardPayload, GuardResult, PiiSpan
 
 
 def _luhn(number: str) -> bool:
@@ -60,42 +65,106 @@ PATTERNS: list[Pattern] = [
 ]
 
 
-def find_pii(text: str) -> list[tuple[int, int, str]]:
+# A placeholder this redactor wrote earlier, e.g. "[EMAIL]". Never redacted again.
+_PLACEHOLDER = re.compile(r"\[[A-Z_]{2,30}\]")
+
+
+def merge_spans(spans: Sequence[PiiSpan]) -> list[PiiSpan]:
     """Non-overlapping spans, earliest and longest first."""
-    spans: list[tuple[int, int, str]] = []
-    for pattern in PATTERNS:
-        spans.extend((s, e, pattern.label) for s, e in pattern.matches(text))
-    spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
-    out: list[tuple[int, int, str]] = []
+    ordered = sorted(spans, key=lambda x: (x.start, -(x.end - x.start)))
+    out: list[PiiSpan] = []
     last_end = -1
-    for s, e, label in spans:
-        if s >= last_end:
-            out.append((s, e, label))
-            last_end = e
+    for span in ordered:
+        if span.start >= last_end:
+            out.append(span)
+            last_end = span.end
     return out
 
 
+class RegexPiiDetector:
+    name = "regex"
+
+    def find(self, text: str) -> list[PiiSpan]:
+        return [
+            PiiSpan(start=s, end=e, label=pattern.label)
+            for pattern in PATTERNS
+            for s, e in pattern.matches(text)
+        ]
+
+
+class Redactor:
+    """Runs every configured detector, merges their spans and replaces them with [LABEL]."""
+
+    def __init__(
+        self, detectors: Sequence[PiiDetector] | None = None, allow: Sequence[str] = ()
+    ) -> None:
+        self.detectors = list(detectors) if detectors else [RegexPiiDetector()]
+        self.allow = {a.strip().lower() for a in allow if a.strip()}
+
+    def find(self, text: str) -> list[PiiSpan]:
+        spans: list[PiiSpan] = []
+        for detector in self.detectors:
+            spans.extend(detector.find(text))
+        keep = []
+        for span in spans:
+            value = text[span.start : span.end]
+            if value.strip().lower() in self.allow or _PLACEHOLDER.fullmatch(value.strip()):
+                continue
+            keep.append(span)
+        return merge_spans(keep)
+
+    def redact(self, text: str) -> tuple[str, list[str]]:
+        spans = self.find(text)
+        if not spans:
+            return text, []
+        parts, pos = [], 0
+        for span in spans:
+            parts.append(text[pos : span.start])
+            parts.append(f"[{span.label}]")
+            pos = span.end
+        parts.append(text[pos:])
+        return "".join(parts), sorted({span.label for span in spans})
+
+    @classmethod
+    def from_config(cls, cfg: GuardrailsSection) -> Redactor:
+        detectors = [registry.create("pii_detector", name, cfg) for name in cfg.pii.detectors]
+        return cls(detectors, cfg.pii.allow)
+
+
+_DEFAULT = Redactor()
+
+
+def find_pii(text: str) -> list[tuple[int, int, str]]:
+    """Regex-only spans as (start, end, label). Kept for callers that need no config."""
+    return [(s.start, s.end, s.label) for s in _DEFAULT.find(text)]
+
+
 def redact(text: str) -> tuple[str, list[str]]:
-    spans = find_pii(text)
-    if not spans:
-        return text, []
-    parts, pos = [], 0
-    for s, e, label in spans:
-        parts.append(text[pos:s])
-        parts.append(f"[{label}]")
-        pos = e
-    parts.append(text[pos:])
-    return "".join(parts), sorted({label for _, _, label in spans})
+    """Regex-only redaction. The orchestrator uses the configured ``Redactor`` instead."""
+    return _DEFAULT.redact(text)
+
+
+@registry.register("pii_detector", "regex")
+def make_regex_detector(cfg: GuardrailsSection) -> RegexPiiDetector:
+    return RegexPiiDetector()
+
+
+@registry.register("pii_detector", "presidio")
+def make_presidio_detector(cfg: GuardrailsSection) -> PiiDetector:
+    from chatbot.guardrails.presidio import PresidioPiiDetector
+
+    return PresidioPiiDetector(cfg.pii.presidio)
 
 
 class PiiGuard:
     name = "pii_redaction"
 
-    def __init__(self, stage: str) -> None:
+    def __init__(self, stage: str, redactor: Redactor | None = None) -> None:
         self.stage = stage
+        self.redactor = redactor or _DEFAULT
 
     async def check(self, payload: GuardPayload) -> GuardResult:
-        text, labels = redact(payload.text)
+        text, labels = self.redactor.redact(payload.text)
         if not labels:
             return GuardResult(action="allow", text=payload.text)
         return GuardResult(action="modify", text=text, reasons=[f"pii:{x}" for x in labels])
@@ -109,8 +178,9 @@ class StreamRedactor:
     (and so possibly the start of a phone number or email) stays in the buffer.
     """
 
-    def __init__(self, holdback: int = 64) -> None:
+    def __init__(self, holdback: int = 64, redactor: Redactor | None = None) -> None:
         self.holdback = holdback
+        self.redactor = redactor or _DEFAULT
         self.pending = ""
 
     def _cut(self) -> int:
@@ -120,9 +190,9 @@ class StreamRedactor:
         cut = max(self.pending.rfind(" ", 0, limit + 1), self.pending.rfind("\n", 0, limit + 1))
         if cut <= 0:
             return 0
-        for s, e, _ in find_pii(self.pending):
-            if s < cut < e:
-                cut = s
+        for span in self.redactor.find(self.pending):
+            if span.start < cut < span.end:
+                cut = span.start
         return cut
 
     def feed(self, text: str) -> str:
@@ -131,8 +201,8 @@ class StreamRedactor:
         if cut <= 0:
             return ""
         out, self.pending = self.pending[:cut], self.pending[cut:]
-        return redact(out)[0]
+        return self.redactor.redact(out)[0]
 
     def flush(self) -> str:
         out, self.pending = self.pending, ""
-        return redact(out)[0]
+        return self.redactor.redact(out)[0]

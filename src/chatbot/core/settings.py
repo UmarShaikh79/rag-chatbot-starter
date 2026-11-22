@@ -29,9 +29,59 @@ class AppSection(Strict):
     env: Literal["dev", "prod"] = "dev"
 
 
+class JwtSection(Strict):
+    """Bearer tokens from any OIDC provider (Auth0, Okta, Entra ID, Keycloak, Cognito, ...)."""
+
+    issuer: str | None = None  # https://login.example.com/ ; must equal the token's iss
+    audience: str | None = None  # must appear in the token's aud
+    jwks_url: str | None = (
+        None  # default: discovered from {issuer}/.well-known/openid-configuration
+    )
+    algorithms: list[str] = ["RS256", "ES256"]
+    hs256_secret_env: str | None = None  # shared-secret tokens (local dev, `chatbot dev-token`)
+    user_id_claim: str = "sub"
+    required_scopes: list[str] = []
+    admin_scope: str = "chatbot:admin"  # lets a token act for any user and use ingestion routes
+    leeway_s: int = Field(30, ge=0, le=300)
+    jwks_cache_s: int = Field(3600, ge=60)
+
+    @model_validator(mode="after")
+    def _algorithms(self) -> JwtSection:
+        allowed = {
+            "RS256",
+            "RS384",
+            "RS512",
+            "PS256",
+            "PS384",
+            "PS512",
+            "ES256",
+            "ES384",
+            "ES512",
+            "EdDSA",
+            "HS256",
+        }
+        bad = [a for a in self.algorithms if a not in allowed]
+        if bad:
+            raise ValueError(f"unsupported JWT algorithms: {bad} (allowed: {sorted(allowed)})")
+        if "HS256" in self.algorithms and not self.hs256_secret_env:
+            raise ValueError("HS256 needs hs256_secret_env (the env var holding the secret)")
+        return self
+
+
 class AuthSection(Strict):
-    mode: Literal["none", "api_key"] = "api_key"
+    # api_key_or_jwt: either credential works (backend services use keys, end users tokens).
+    mode: Literal["none", "api_key", "jwt", "api_key_or_jwt"] = "api_key"
     api_keys_env: str = "CHATBOT_API_KEYS"
+    jwt: JwtSection = JwtSection()
+
+    @model_validator(mode="after")
+    def _jwt_complete(self) -> AuthSection:
+        if self.mode in ("jwt", "api_key_or_jwt"):
+            if not self.jwt.audience:
+                raise ValueError(f"auth.mode {self.mode} needs auth.jwt.audience")
+            if not self.jwt.issuer:
+                raise ValueError(f"auth.mode {self.mode} needs auth.jwt.issuer")
+        return self
 
 
 class ModelsSection(Strict):
@@ -106,7 +156,7 @@ class RetrievalSection(Strict):
 
 
 class AnswerSection(Strict):
-    prompt: str = "answer/v1"
+    prompt: str = "answer/v2"
     clarify_prompt: str = "clarify/v1"
     max_context_chunks: int = 6
     citations: Literal["required", "optional"] = "required"
@@ -114,10 +164,34 @@ class AnswerSection(Strict):
     stream_mode: Literal["draft_then_final", "buffered"] = "draft_then_final"
 
 
+class SummaryOptions(Strict):
+    """Rolling summary per conversation: turns that leave the history window are folded in."""
+
+    enabled: bool = True
+    prompt: str = "summarize/v1"
+    refresh_after_turns: int = Field(4, ge=1)  # fold once this many turns have left the window
+    max_chars: int = Field(1500, ge=200)
+
+
+class LongTermOptions(Strict):
+    """Facts about a user (preferences, context) kept across conversations, keyed by user_id."""
+
+    enabled: bool = True
+    prompt: str = "extract_facts/v1"
+    max_facts_per_user: int = Field(50, ge=1)
+    facts_in_prompt: int = Field(20, ge=0)
+    max_fact_chars: int = Field(200, ge=20)
+
+
 class MemorySection(Strict):
     backend: str = "postgres"
     history_turns: int = 10
     redact_before_persist: bool = True
+    # Where summaries and fact extraction run: worker (a background job after each turn) or
+    # inline (before the response returns; simpler, slower).
+    run_in: Literal["worker", "inline"] = "worker"
+    summary: SummaryOptions = SummaryOptions()
+    long_term: LongTermOptions = LongTermOptions()
 
 
 class InputGuards(Strict):
@@ -132,12 +206,52 @@ class ContextGuards(Strict):
 
 class OutputGuards(Strict):
     pii_redaction: bool = True
+    prompt_leak_check: bool = True  # refuse answers that repeat the system prompt verbatim
+
+
+class PresidioOptions(Strict):
+    language: str = "en"
+    spacy_model: str = "en_core_web_sm"  # en_core_web_lg is more accurate, ~400 MB
+    entities: list[str] = [
+        "PERSON",
+        "LOCATION",
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "CREDIT_CARD",
+        "IBAN_CODE",
+        "US_SSN",
+        "IP_ADDRESS",
+    ]
+    score_threshold: float = Field(0.5, ge=0.0, le=1.0)
+
+
+class PiiSection(Strict):
+    # Detectors run together and their spans are merged. regex: built in, no downloads.
+    # presidio: names and addresses too (install the `presidio` extra and a spaCy model).
+    detectors: list[str] = Field(["regex"], min_length=1)
+    allow: list[str] = []  # exact strings never redacted, e.g. your public support address
+    presidio: PresidioOptions = PresidioOptions()
+
+
+class LlmInjectionOptions(Strict):
+    model_role: Literal["answer", "cheap"] = "cheap"
+    prompt: str = "guard_injection/v1"
+    stages: list[Literal["input", "context"]] = ["input"]  # one model call per checked text
+    on_error: Literal["allow", "block"] = "allow"  # if the classifier call fails
+
+
+class InjectionSection(Strict):
+    # heuristic: built-in rules on normalised text. llm: a classifier prompt on the cheap model.
+    detectors: list[str] = Field(["heuristic"], min_length=1)
+    llm: LlmInjectionOptions = LlmInjectionOptions()
 
 
 class GuardrailsSection(Strict):
     input: InputGuards = InputGuards()
     context: ContextGuards = ContextGuards()
     output: OutputGuards = OutputGuards()
+    pii: PiiSection = PiiSection()
+    injection: InjectionSection = InjectionSection()
     stream_holdback_chars: int = Field(64, ge=16)
 
 
