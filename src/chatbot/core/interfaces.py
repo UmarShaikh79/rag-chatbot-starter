@@ -81,7 +81,30 @@ class VectorStore(Protocol):
 
     async def search(
         self, index: IndexInfo, vector: list[float], k: int, filters: dict[str, Any]
-    ) -> list[ScoredChunk]: ...
+    ) -> list[ScoredChunk]:
+        """``filters``: ``document_id`` (one ID or a list) plus metadata keys, all ANDed.
+        Every store applies metadata keys as ``metadata_matches`` does."""
+        ...
+
+
+def metadata_matches(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
+    """The metadata filter rule every store follows (``document_id`` is handled apart).
+
+    A scalar filter value matches the key's value, or any element when the stored value is a
+    list: ``{"tags": "faq"}`` matches ``"faq"`` and ``["faq", "billing"]``. A list filter value
+    requires every element: ``{"tags": ["faq", "billing"]}`` matches only a list holding both.
+    """
+    for key, value in filters.items():
+        if key == "document_id":
+            continue
+        if key not in metadata:
+            return False
+        stored = metadata[key]
+        have = stored if isinstance(stored, list) else [stored]
+        for item in value if isinstance(value, list) else [value]:
+            if item not in have:
+                return False
+    return True
 
 
 @runtime_checkable

@@ -13,6 +13,17 @@ matters, how to bring the change into a copy you have already modified.
   returned. `min_score` is unchanged. In a copy you have modified: take the `assess` change in
   `retrieval/weak.py`, the two new arguments at its call in `orchestration/simple.py`, and the
   setting; set `min_hits_filtered: null` to keep the old behaviour.
+- Fix: metadata filters meant different things per vector store. A single value on a list
+  field (`{"tags": "contact"}` against `["hours", "contact"]`) matched in Qdrant, never in
+  pgvector (JSON containment does not match a value against a nested array) and only by
+  equality in the in-memory test store. All stores now follow Qdrant's documented rule,
+  written down as `chatbot.core.interfaces.metadata_matches`: a single value matches the value
+  or any element of a list; a list requires every element. pgvector's clause is
+  `metadata @> {k: v} OR metadata @> {k: [v]}` per value, still served by the GIN index and
+  still compatible with HNSW. Filters that worked before return the same results.
+  `tests/integration/test_store_filters.py` runs the same cases against every store. In a copy
+  you have modified: take `PgVectorStore._where`; a custom store should apply
+  `metadata_matches` and join that test.
 - Fix: the Docker image now includes `evals/`. Before, `chatbot calibrate` and `chatbot eval`
   failed inside a container (`FileNotFoundError: /app/evals/datasets/golden.jsonl`), so an
   image-only deployment (Compose without uv on the host, Kubernetes) could not calibrate its

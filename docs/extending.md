@@ -245,6 +245,11 @@ capabilities: `keyword_search` (BM25 and hybrid retrieval) and `forget_user_docu
 vectors carry user data outside Postgres). Move an existing index into it with
 `chatbot reindex`.
 
+Filters must mean the same in every store: apply metadata keys the way
+`chatbot.core.interfaces.metadata_matches` does (a scalar matches the value or any element of a
+list; a list needs every element), and add your store to
+`tests/integration/test_store_filters.py`, which runs the same cases against each store.
+
 ## Change prompts
 
 Copy `prompts/answer/v2.yaml` to `v3.yaml`, edit, and set `answer.prompt: answer/v3`. Keep the

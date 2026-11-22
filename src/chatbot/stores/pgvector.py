@@ -161,10 +161,15 @@ class PgVectorStore(CatalogStore):
             ids = doc if isinstance(doc, list) else [doc]
             clauses.append("c.document_id = ANY(%s)")
             params.append([str(i) for i in ids])
-        meta = {k: v for k, v in filters.items() if k != "document_id"}
-        if meta:
-            clauses.append("c.metadata @> %s::jsonb")
-            params.append(json.dumps(meta))
+        # Metadata filters, the same rule in every store (see chatbot.core.interfaces): a scalar
+        # matches the key's value or any element of a list value; a list requires every
+        # element. Each item is "equal or contained", both of which the GIN index can serve.
+        for key, value in filters.items():
+            if key == "document_id":
+                continue
+            for item in value if isinstance(value, list) else [value]:
+                clauses.append("(c.metadata @> %s::jsonb OR c.metadata @> %s::jsonb)")
+                params.extend([json.dumps({key: item}), json.dumps({key: [item]})])
         return " AND ".join(clauses), params
 
     async def search(

@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from chatbot.core.errors import ForbiddenError, IndexMismatchError
+from chatbot.core.interfaces import metadata_matches
 from chatbot.core.types import (
     Calibration,
     Chunk,
@@ -113,8 +114,7 @@ class InMemoryVectorStore:
                     wanted = filters["document_id"]
                     if doc_id not in (wanted if isinstance(wanted, list) else [wanted]):
                         continue
-                meta = {k2: v for k2, v in filters.items() if k2 != "document_id"}
-                if any(chunk.metadata.get(k2) != v for k2, v in meta.items()):
+                if not metadata_matches(chunk.metadata, filters):
                     continue
                 score = cosine(vector, vec)
                 hits.append(
@@ -135,10 +135,7 @@ class InMemoryVectorStore:
                 wanted if isinstance(wanted, list) else [wanted]
             ):
                 continue
-            meta = {k2: v for k2, v in filters.items() if k2 != "document_id"}
-            out.extend(
-                c for c, _ in items if all(c.metadata.get(k2) == v for k2, v in meta.items())
-            )
+            out.extend(c for c, _ in items if metadata_matches(c.metadata, filters))
         return out
 
     async def keyword_search(
