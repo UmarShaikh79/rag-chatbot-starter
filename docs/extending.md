@@ -273,3 +273,5 @@ payload's `user_id`. A failed job is retried unless `chatbot.core.errors.is_perm
 another attempt would fail the same way (4xx statuses other than 408/409/425/429, or a
 `ChatbotError` with `permanent = True`); raise your errors `from` the HTTP error, or set
 `permanent`, so the worker can tell. A custom `JobQueue` needs `fail(job_id, error, retry=True)`.
+To put an error into a result or report, use `chatbot.core.errors.error_text(exc)`: it scrubs
+credentials, which `f"{exc}"` does not.

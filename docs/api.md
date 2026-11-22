@@ -138,7 +138,10 @@ label, so `{"source": "crm", "documents": [{"id": "42"}]}` becomes `crm:42`:
 
 Both return `202 {"job_id", "status_url"}`. The worker picks the job up; `GET /v1/jobs/{id}`
 returns `status` (`queued`, `running`, `succeeded`, `failed`), `attempts`, `last_error` and a
-`result` report (`indexed`, `unchanged`, `removed`, `failed`, `chunks`, `usage`).
+`result` report (`indexed`, `unchanged`, `removed`, `failed`, `chunks`, `usage`). Error texts
+in `last_error` and `result.failed` are `"Type: message"` with credentials replaced by
+`[redacted]` (an OpenAI 401 message, for one, repeats part of the key); the full error is in the
+worker's log line.
 
 ## Memory
 

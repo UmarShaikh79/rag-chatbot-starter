@@ -1,3 +1,6 @@
+import re
+
+
 class ChatbotError(Exception):
     """Base error for the template.
 
@@ -88,9 +91,41 @@ def describe_error(exc: BaseException) -> tuple[int, str]:
     The full error is in the log line with the same trace ID.
     """
     if isinstance(exc, ProviderError):
-        return 502, str(exc)
+        return 502, scrub_secrets(str(exc))
     if _sdk_provider_error(exc):
         return 502, f"the model provider failed ({type(exc).__name__})"
     if isinstance(exc, ChatbotError):
-        return 500, str(exc)
+        return 500, scrub_secrets(str(exc))
     return 500, "internal error"
+
+
+# Credentials that can appear in error messages: provider keys (OpenAI echoes a masked key in
+# its 401 message), this template's API keys, JWTs, bearer tokens, URL passwords, key=value.
+_SECRETS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_*-]{8,}"), "[redacted]"),
+    (re.compile(r"\bcb_[A-Za-z0-9_-]{20,}"), "[redacted]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"), "[redacted]"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), r"\1 [redacted]"),
+    (re.compile(r"(\b[a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@", re.I), r"\1[redacted]@"),
+    (
+        re.compile(
+            r"(?i)\b(api[_-]?key|access[_-]?token|secret|password|passwd|token)"
+            r"([\"']?\s*[=:]\s*)[\"']?[^\s\"',;&]{6,}"
+        ),
+        r"\1\2[redacted]",
+    ),
+]
+
+
+def scrub_secrets(text: str) -> str:
+    """``text`` with anything that looks like a credential replaced by ``[redacted]``."""
+    for pattern, replacement in _SECRETS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def error_text(exc: BaseException) -> str:
+    """``"Type: message"`` for storing or showing an error, with credentials scrubbed. Use it
+    wherever an error leaves the process: job ``last_error`` and results, span status
+    (exported to your tracing backend), reports."""
+    return scrub_secrets(f"{type(exc).__name__}: {exc}")

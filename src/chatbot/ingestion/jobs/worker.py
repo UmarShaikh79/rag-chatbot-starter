@@ -9,7 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from chatbot.core.errors import is_permanent
+from chatbot.core.errors import error_text, is_permanent
 from chatbot.core.interfaces import JobQueue
 from chatbot.core.types import Job
 from chatbot.observability.instrument import metered_operation
@@ -71,7 +71,8 @@ class Worker:
                 "job failed" if retry else "job failed permanently, not retried",
                 extra={"job_id": job.id, "kind": job.kind, "retry": retry},
             )
-            await self.queue.fail(job.id, f"{type(exc).__name__}: {exc}", retry=retry)
+            # last_error is returned by GET /v1/jobs/{id}: no key fragments in it.
+            await self.queue.fail(job.id, error_text(exc), retry=retry)
         finally:
             seconds = time.perf_counter() - started
             count("chatbot.jobs", 1, {"chatbot.job.kind": job.kind, "chatbot.job.status": status})

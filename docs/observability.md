@@ -65,6 +65,12 @@ models, tokens and cost. Turn it on to see prompts, retrieved chunk IDs and scor
 The text is always what the guards produced, so PII in user messages is already redacted.
 Retrieved documents are not redacted.
 
+Failed spans carry the error type and message, and an `exception` event with the stack trace.
+Credentials in them (provider keys, including the masked key OpenAI repeats in a 401, this
+template's `cb_` keys, JWTs, bearer tokens, URL passwords, `api_key=`-style values) are replaced
+by `[redacted]` before export (`chatbot.core.errors.scrub_secrets`). Log lines are not scrubbed;
+they stay on your servers.
+
 User and session are on every span whatever `capture_text` says: `langfuse.user.id` (the
 request's `user_id`, or the token's `sub`) and `langfuse.session.id` (the conversation), so any
 OpenTelemetry backend (Jaeger, Tempo, Honeycomb) stores them too. `langfuse.send_user_id`

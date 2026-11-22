@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from chatbot.core.errors import error_text
 from chatbot.core.types import ChatRequest, ScoredChunk, Usage
 from chatbot.evals import metrics as m
 from chatbot.evals.dataset import GoldenItem
@@ -130,7 +131,7 @@ async def run_answers(
                 answer="",
                 cited=[],
                 latency_ms=round((time.perf_counter() - start) * 1000, 1),
-                error=f"{type(exc).__name__}: {exc}",
+                error=error_text(exc),
             )
         latency = round((time.perf_counter() - start) * 1000, 1)
         row = AnswerRow(

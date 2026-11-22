@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from chatbot.core.errors import error_text
 from chatbot.core.interfaces import Chunker, Embedder, Source, VectorStore
 from chatbot.core.types import IndexInfo, ParsedDocument, RawDocument, Usage
 from chatbot.ingestion.parsers import parser_for
@@ -128,7 +129,7 @@ class IngestionPipeline:
                 # Bad file: record it and keep going. Provider/database errors propagate so
                 # the job is retried; unchanged documents are skipped on retry.
                 log.warning("document failed", extra={"document_id": raw.id, "error": str(exc)})
-                report.failed[raw.id] = f"{type(exc).__name__}: {exc}"
+                report.failed[raw.id] = error_text(exc)
         for doc_id in await self.store.list_document_ids(index, source.name):
             if doc_id not in seen:
                 await self.store.delete_document(index, doc_id)

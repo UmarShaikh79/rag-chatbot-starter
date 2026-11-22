@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import time
+import traceback
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -222,9 +223,19 @@ class _OtelSpan(SpanHandle):
     def fail(self, exc: BaseException | str) -> None:
         from opentelemetry.trace import Status, StatusCode
 
-        message = exc if isinstance(exc, str) else f"{type(exc).__name__}: {exc}"
+        from chatbot.core.errors import error_text, scrub_secrets
+
+        # Spans leave the process (Jaeger, Tempo, Langfuse): no credentials in them.
+        message = scrub_secrets(exc) if isinstance(exc, str) else error_text(exc)
         if isinstance(exc, BaseException):
-            self._span.record_exception(exc)
+            stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            self._span.record_exception(
+                exc,
+                attributes={
+                    "exception.message": scrub_secrets(str(exc)),
+                    "exception.stacktrace": scrub_secrets(stack),
+                },
+            )
         self._span.set_status(Status(StatusCode.ERROR, message))
         self._span.set_attribute("langfuse.observation.level", "ERROR")
 

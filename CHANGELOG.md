@@ -5,6 +5,16 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Fix: error texts that leave the process kept credentials found in the error. A job whose
+  OpenAI key was wrong stored `Incorrect API key provided: sk-inval****…wxy` in `last_error`,
+  returned by `GET /v1/jobs/{id}`, and the same text went into the span status and exception
+  event exported to Jaeger or Langfuse. New `scrub_secrets()` and `error_text()` in
+  `core/errors.py` replace provider keys (`sk-`, `sk-proj-`, `pk-lf-`/`sk-lf-`, masked or not),
+  `cb_` API keys, JWTs, bearer tokens, URL passwords and `api_key=`/`token=`/`password=` values
+  with `[redacted]`, keeping the rest of the message. Used for job `last_error`, ingest and
+  reindex `failed` entries, eval report errors, span status and exception events, and the
+  `detail` of 500/502 responses. Log lines are unchanged. In a copy you have modified: use
+  `error_text(exc)` wherever you store or export an error.
 - `.env.example` lists every variable the template reads, all without values: examples moved
   into the comments, so a copied file never carries a placeholder such as a sample database
   URL. Only `CHATBOT_PROFILE`, `OPENAI_API_KEY`, `CHATBOT_API_KEYS` and `DATABASE_URL` are
