@@ -233,6 +233,9 @@ class RetrievalSection(Strict):
     gate: Literal["auto", "dense", "bm25", "rerank"] = "auto"
     min_score: float = 0.35  # provisional until calibrated (ADR 011)
     min_hits: int = Field(1, ge=1)
+    # Requests with filters search a slice of the corpus, so fewer chunks can corroborate an
+    # answer: min_hits is lowered to this for them (min_score still applies). null: no change.
+    min_hits_filtered: int | None = Field(1, ge=1)
     thresholds_from: Literal["index", "config"] = "index"
 
     def retriever_names(self) -> list[str]:

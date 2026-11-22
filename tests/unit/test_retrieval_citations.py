@@ -73,3 +73,27 @@ def test_format_sources_numbers_from_one():
     out = format_sources([hit(0.9, 0), hit(0.8, 1)])
     assert out.startswith("[1] (Doc 0) text 0")
     assert "\n\n[2] (Doc 1) text 1" in out
+
+
+def test_filtered_requests_need_fewer_corroborating_hits():
+    """Regression: min_hits is calibrated on the whole corpus; a filter to one document's
+    chunks rarely has two strong ones, so every filtered question used to clarify."""
+    cfg = RetrievalSection(min_score=0.5, min_hits=2)  # min_hits_filtered defaults to 1
+    hits = [hit(0.9), hit(0.2, 1), hit(0.1, 2)]
+    assert assess(hits, cfg, None).weak  # unfiltered: still needs two strong hits
+    verdict = assess(hits, cfg, None, filtered=True)
+    assert not verdict.weak and verdict.min_hits == 1
+    assert assess([hit(0.4)], cfg, None, filtered=True).weak  # min_score still applies
+    calibrated = assess(hits, cfg, calib(0.5, 3), filtered=True)  # calibrated value is capped
+    assert not calibrated.weak and calibrated.min_hits == 1 and calibrated.calibrated
+    off = RetrievalSection(min_score=0.5, min_hits=2, min_hits_filtered=None)
+    assert assess(hits, off, None, filtered=True).weak
+
+
+def test_min_hits_never_exceeds_what_retrieval_could_return():
+    cfg = RetrievalSection(min_score=0.5, min_hits=3, min_hits_filtered=None)
+    assert assess([hit(0.9), hit(0.8)], cfg, None).weak  # pool not known to be exhausted
+    verdict = assess([hit(0.9), hit(0.8)], cfg, None, available=2)
+    assert not verdict.weak and verdict.min_hits == 2
+    assert assess([hit(0.9), hit(0.3)], cfg, None, available=2).weak  # both must be strong
+    assert assess([], cfg, None, available=0).weak  # nothing found is never strong

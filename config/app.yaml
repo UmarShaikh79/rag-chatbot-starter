@@ -114,6 +114,7 @@ retrieval:
   gate: auto                        # score min_score applies to: auto | dense | bm25 | rerank
   min_score: 0.35                   # provisional until `chatbot calibrate` (ADR 011, ADR 021)
   min_hits: 1                       # always paired with min_score
+  min_hits_filtered: 1              # min_hits for requests with filters (a slice of the corpus); null: same
   thresholds_from: index            # index | config; calibrated values stored with the index win
 
 answer:

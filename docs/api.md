@@ -32,10 +32,17 @@ source/job/document/fact, 409 index built with a different embedding model, 422 
   "message": "How long is the refund window?",
   "user_id": "customer-42",          // optional; your app's ID for the end user (JWT: the token's sub)
   "conversation_id": null,           // omit to start a conversation; reuse the returned one
-  "filters": {"source": "samples"},  // optional; metadata containment, plus document_id
+  "filters": {"source": "samples"},  // optional; see "Filters" below
   "stream": false
 }
 ```
+
+Filters (`filters`, the same in every vector store): `document_id` takes one ID or a list.
+Any other key matches chunk metadata, and all keys must match. A single value matches the
+key's value or any element of a list value (`{"tags": "faq"}` matches `"faq"` and
+`["faq", "billing"]`); a list requires every element (`{"tags": ["faq", "billing"]}`).
+Values are compared with their JSON type (`7` is not `"7"`). A filtered question is held to
+`retrieval.min_hits_filtered` instead of the corpus-wide `min_hits` (see configuration.md).
 
 Response (`ChatResponse`):
 

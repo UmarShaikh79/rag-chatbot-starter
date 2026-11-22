@@ -128,12 +128,13 @@ async def test_selective_filter_still_returns_top_k_with_hnsw(db, hnsw_pool):
     await seed(store, info, rng)
     query = unit_vec(rng)
 
+    # The store's own WHERE clause, so a change to the filter SQL is checked against HNSW.
+    where, params = PgVectorStore._where(info, {"tier": "rare"})
     async with hnsw_pool.connection() as conn:
         cur = await conn.execute(
-            f"""EXPLAIN SELECT id FROM chunks c WHERE c.index_id = {info.id}
-                AND c.metadata @> '{{"tier": "rare"}}'::jsonb
+            f"""EXPLAIN SELECT id FROM chunks c WHERE {where}
                 ORDER BY (c.embedding::vector({DIMS})) <=> %s::vector({DIMS}) LIMIT {k}""",
-            ("[" + ",".join(map(str, query)) + "]",),
+            [*params, "[" + ",".join(map(str, query)) + "]"],
         )
         plan = "\n".join(r["QUERY PLAN"] for r in await cur.fetchall())
     assert f"chunks_hnsw_{info.id}" in plan

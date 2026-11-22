@@ -7,6 +7,15 @@ named by ``retrieval.gate`` (dense cosine, BM25 or rerank), never a fused RRF ra
 Thresholds calibrated for the index and the exact retrieval pipeline (stored with the index)
 win over config; until then the config values are provisional and a warning is logged,
 because a score means nothing on its own.
+
+``min_hits`` is calibrated on the whole corpus, where an answer is often backed by several
+chunks. Two cases search less than that, so ``min_hits`` is lowered for them (never
+``min_score``):
+
+* the request has filters: ``retrieval.min_hits_filtered`` (default 1) applies, because a
+  filter to one customer's or one product's documents leaves few chunks to agree;
+* retrieval returned fewer candidates than asked for (``available``): the filter or the
+  corpus has no more, and requiring more strong hits than exist would always clarify.
 """
 
 from __future__ import annotations
@@ -65,9 +74,17 @@ def assess(
     calibration: Calibration | None,
     gate: str | None = None,
     warn_key: str | None = None,
+    filtered: bool = False,
+    available: int | None = None,
 ) -> Assessment:
+    """``filtered``: the request had filters. ``available``: how many candidates retrieval
+    returned, before any guard dropped some; pass it only when that was fewer than asked."""
     gate = gate or cfg.gate_signal()
     min_score, min_hits, calibrated = thresholds(cfg, calibration)
+    if filtered and cfg.min_hits_filtered is not None:
+        min_hits = min(min_hits, cfg.min_hits_filtered)
+    if available is not None:
+        min_hits = max(1, min(min_hits, available))
     warnings = []
     if not calibrated and cfg.thresholds_from == "index" and warn_key is not None:
         if warn_key not in _warned:  # once per process and scorer, not on every request
