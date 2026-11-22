@@ -6,7 +6,9 @@ document, and several chunks of one document count once.
 
 from __future__ import annotations
 
+import re
 import statistics
+import unicodedata
 from collections.abc import Sequence
 
 
@@ -36,9 +38,52 @@ def reciprocal_rank(doc_ids: Sequence[str], expected: Sequence[str]) -> float:
     return 0.0
 
 
-def includes_all(answer: str, phrases: Sequence[str]) -> float:
-    text = answer.lower()
-    return float(all(p.lower() in text for p in phrases))
+# Contractions a model writes where a golden phrase spells words out ("aren't refunded" must
+# match "not refunded"). Irregular forms first, then the regular n't.
+_CONTRACTIONS = [
+    (re.compile(r"\bcan't\b"), "cannot"),
+    (re.compile(r"\bwon't\b"), "will not"),
+    (re.compile(r"\bshan't\b"), "shall not"),
+    (re.compile(r"n't\b"), " not"),
+    (re.compile(r"'re\b"), " are"),
+    (re.compile(r"'ll\b"), " will"),
+    (re.compile(r"'ve\b"), " have"),
+]
+
+
+def normalize(text: str) -> str:
+    """Lower case, plain quotes and dashes, no markdown emphasis, contractions spelled out,
+    single spaces. What ``must_include`` phrases and answers are compared in."""
+    text = unicodedata.normalize("NFKC", text).casefold()
+    text = text.translate(
+        str.maketrans(
+            {
+                "\u2018": "'",
+                "\u2019": "'",
+                "\u201c": '"',
+                "\u201d": '"',
+                "\u2013": "-",
+                "\u2014": "-",
+            }
+        )
+    )
+    text = re.sub(r"[*_`]+", "", text)
+    for pattern, replacement in _CONTRACTIONS:
+        text = pattern.sub(replacement, text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def includes_all(answer: str, phrases: Sequence[str | Sequence[str]]) -> float:
+    """1.0 when the answer contains every phrase. A phrase may be a list of alternatives, any
+    one of which counts (["not refunded", "no refund"]). Compared after ``normalize``, so case,
+    curly quotes, markdown and contractions ("aren't") don't matter."""
+    text = normalize(answer)
+
+    def found(phrase: str | Sequence[str]) -> bool:
+        options = [phrase] if isinstance(phrase, str) else list(phrase)
+        return any(normalize(o) in text for o in options)
+
+    return float(all(found(p) for p in phrases))
 
 
 def citation_precision(cited: Sequence[str], expected: Sequence[str]) -> float:

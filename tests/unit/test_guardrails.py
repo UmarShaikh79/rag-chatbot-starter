@@ -396,3 +396,17 @@ async def test_ner_redacts_the_question_but_not_the_answer():
     )
     resp = await old.orchestrator.run(ChatRequest(message=q))
     assert "[PERSON]" in resp.answer and "renewal" not in resp.answer  # the old behaviour
+
+
+def test_shipped_allow_list_keeps_the_sample_product_in_questions():
+    """NER tags product names as people. The shipped config allows the sample product, so a
+    question about it keeps the word; a real name is still redacted."""
+    from chatbot.guardrails.pii import Redactor
+    from tests.conftest import offline_settings
+
+    cfg = offline_settings().guardrails
+    assert "tidepool" in {a.lower() for a in cfg.pii.allow}
+    redactor = Redactor([WordNer({"Tidepool", "Alice"})], cfg.pii.allow)
+    text, labels = redactor.redact("Which programming language is Tidepool written in, Alice?")
+    assert text == "Which programming language is Tidepool written in, [PERSON]?"
+    assert labels == ["PERSON"]

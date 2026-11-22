@@ -132,3 +132,44 @@ def test_serve_checks_database_url_and_api_keys_before_starting(monkeypatch, cap
     err = serve_error(DATABASE_URL="postgresql://u:p@db:5432/x")
     assert err.startswith("auth.mode is api_key but CHATBOT_API_KEYS is empty")
     assert "Traceback" not in err
+
+
+def test_index_unalias_refuses_the_configured_alias(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from chatbot import cli
+
+    removed = []
+
+    class Store:  # an IndexAdmin store, enough for the command
+        async def create_index(self, *a, **k): ...
+        async def mark_ready(self, *a, **k): ...
+        async def activate(self, *a, **k): ...
+        async def rollback(self, *a, **k): ...
+        async def drop_index(self, *a, **k): ...
+        async def list_indexes(self): ...
+        async def resolve_any(self, *a): ...
+        async def iter_documents(self, *a): ...
+
+        async def remove_alias(self, alias):
+            removed.append(alias)
+            return ["docs_offline__hashing_v1__384"]
+
+    async def close():
+        return None
+
+    async def components(role="cli"):
+        settings = load_settings(root=ROOT, profile="offline", environ={})
+        return SimpleNamespace(store=Store(), settings=settings, close=close)
+
+    monkeypatch.setattr(cli, "_components", components)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["index", "unalias", "docs_offline"])
+    assert exc.value.code == 2 and removed == []
+    assert "the alias this configuration serves" in capsys.readouterr().err
+
+    cli.main(["index", "unalias", "scratch"])
+    assert removed == ["scratch"]
+    assert '"removed": "scratch"' in capsys.readouterr().out
+    cli.main(["index", "unalias", "docs_offline", "--force"])
+    assert removed == ["scratch", "docs_offline"]

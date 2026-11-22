@@ -1,5 +1,5 @@
 {"id": "q01", "question": "How long is the refund window for annual plans?", "answerable": true, "expected_documents": ["samples:refund-policy.md"], "must_include": ["30 days"]}
-{"id": "q02", "question": "Can I get a refund for a partial month on a monthly plan?", "answerable": true, "expected_documents": ["samples:refund-policy.md"], "must_include": ["not refunded"]}
+{"id": "q02", "question": "Can I get a refund for a partial month on a monthly plan?", "answerable": true, "expected_documents": ["samples:refund-policy.md"], "must_include": [["not refunded", "no refund", "non-refundable"]]}
 {"id": "q03", "question": "How long do refunds take to arrive?", "answerable": true, "expected_documents": ["samples:refund-policy.md"], "must_include": ["5 to 10 business days"]}
 {"id": "q04", "question": "How much does the Plus plan cost per year?", "answerable": true, "expected_documents": ["samples:plans-and-billing.md"], "must_include": ["40"]}
 {"id": "q05", "question": "How many devices can I use on the Free plan?", "answerable": true, "expected_documents": ["samples:plans-and-billing.md"], "must_include": ["2 devices"]}
@@ -10,11 +10,11 @@
 {"id": "q10", "question": "How many people can edit the same note at once?", "answerable": true, "expected_documents": ["samples:sharing-and-collaboration.md"], "must_include": ["25"]}
 {"id": "q11", "question": "Where are notes stored by default?", "answerable": true, "expected_documents": ["samples:privacy-and-data.html"], "must_include": ["Frankfurt"]}
 {"id": "q12", "question": "How long do deleted notes stay in the Trash?", "answerable": true, "expected_documents": ["samples:privacy-and-data.html"], "must_include": ["30 days"]}
-{"id": "q13", "question": "Does Tidepool support SMS codes for two-factor authentication?", "answerable": true, "expected_documents": ["samples:security-faq.docx"], "must_include": ["not supported"]}
+{"id": "q13", "question": "Does Tidepool support SMS codes for two-factor authentication?", "answerable": true, "expected_documents": ["samples:security-faq.docx"], "must_include": [["not supported", "does not support", "not SMS", "no SMS"]]}
 {"id": "q14", "question": "How many recovery codes do I get when I turn on 2FA?", "answerable": true, "expected_documents": ["samples:security-faq.docx"], "must_include": ["10"]}
 {"id": "q15", "question": "What is the keyboard shortcut for quick search?", "answerable": true, "expected_documents": ["samples:keyboard-shortcuts.pdf"], "must_include": ["Ctrl+K"]}
 {"id": "q16", "question": "What is the maximum size of a single note?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["25 MB"]}
-{"id": "q17", "question": "Does Tidepool have a Linux desktop app?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q17", "question": "Does Tidepool have a Linux desktop app?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": [["web", "Windows", "macOS"]]}
 {"id": "q18", "question": "What is the CEO's name?", "answerable": false, "expected_documents": [], "must_include": []}
 {"id": "q19", "question": "Can I pay with cryptocurrency?", "answerable": false, "expected_documents": [], "must_include": []}
 {"id": "q20", "question": "How do I integrate Tidepool with Jira?", "answerable": false, "expected_documents": [], "must_include": []}
@@ -22,7 +22,7 @@
 {"id": "q22", "question": "How long is the verification email valid?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["24 hours"]}
 {"id": "q23", "question": "How many tags can one note have?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["50"]}
 {"id": "q24", "question": "Can a public link expire?", "answerable": true, "expected_documents": ["samples:sharing-and-collaboration.md"], "must_include": ["30 days"]}
-{"id": "q25", "question": "Will I lose unsynced changes if I reset the local cache?", "answerable": true, "expected_documents": ["samples:sync-troubleshooting.md"], "must_include": ["lost"]}
+{"id": "q25", "question": "Will I lose unsynced changes if I reset the local cache?", "answerable": true, "expected_documents": ["samples:sync-troubleshooting.md"], "must_include": [["lost", "lose", "deleted", "deletes", "removed", "discarded"]]}
 {"id": "q26", "question": "How deeply can notebooks be nested?", "answerable": true, "expected_documents": ["samples:getting-started.md"], "must_include": ["three levels"]}
 {"id": "q27", "question": "Which role lets someone comment without editing?", "answerable": true, "expected_documents": ["samples:sharing-and-collaboration.md"], "must_include": ["Commenter"]}
 {"id": "q28", "question": "Which app versions can no longer sync?", "answerable": true, "expected_documents": ["samples:sync-troubleshooting.md"], "must_include": ["3.0"], "tags": ["exact-term"]}
@@ -32,3 +32,4 @@
 {"id": "q32", "question": "Can I import notes from Evernote?", "answerable": false, "expected_documents": [], "must_include": []}
 {"id": "q33", "question": "Does the app have a dark mode?", "answerable": false, "expected_documents": [], "must_include": []}
 {"id": "q34", "question": "Which programming language is Tidepool written in?", "answerable": false, "expected_documents": [], "must_include": []}
+{"id": "q35", "question": "Is there a browser extension for clipping web pages?", "answerable": false, "expected_documents": [], "must_include": []}

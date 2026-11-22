@@ -16,7 +16,10 @@ class GoldenItem(BaseModel):
     question: str
     answerable: bool
     expected_documents: list[str] = []  # document IDs that hold the answer
-    must_include: list[str] = []  # phrases a correct answer contains (case-insensitive)
+    # Phrases a correct answer contains. An entry may be a list of alternatives, any one of
+    # which counts. Matched after metrics.normalize: case, quotes, markdown and contractions
+    # don't matter.
+    must_include: list[str | list[str]] = []
     tags: list[str] = []  # free labels for slicing reports, e.g. ["exact-term"]
 
     @model_validator(mode="after")
