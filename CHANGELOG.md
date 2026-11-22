@@ -15,6 +15,24 @@ matters, how to bring the change into a copy you have already modified.
   `OLLAMA_TEST_URL`, `RUN_LIVE_TESTS`. `tests/unit/test_env_example.py` now also finds
   `os.environ` reads in `src` and `tests`, and fails on any value or extra uncommented line.
   In a copy you have modified: compare your `.env` with the new file; nothing in it changes.
+- Fix: a missing `OPENAI_API_KEY` crashed `chatbot serve`, `chatbot worker` and the CLI with the
+  OpenAI SDK's 20-line traceback ("Missing credentials"). Missing keys are now one message
+  before anything starts, e.g. `Missing API key(s) for the 'dev' profile: OPENAI_API_KEY needed
+  by models.answer (openai:answer), models.cheap (...), models.embed (...)`, exit code 2
+  (`Settings.required_credentials()` / `check_credentials()`; the Cohere key counts when
+  reranking is on). `chatbot serve` also checks `DATABASE_URL`, the API-key hashes or JWT secret
+  and the Langfuse keys before uvicorn starts; those errors are now `ConfigError` (still a
+  `RuntimeError`) instead of bare `RuntimeError`s that the CLI printed as tracebacks. The OpenAI
+  adapters raise the same `ConfigError` when built without a key.
+- Fix: background jobs retried errors that can't succeed. A key without access to the model
+  (403), a wrong key (401), a missing model or source (404) or a bad request was retried up to
+  `worker.max_attempts` times with backoff before failing. The worker now asks
+  `is_permanent(exc)` (`core/errors.py`: 4xx other than 408/409/425/429, from OpenAI, `httpx`,
+  Ollama or Cohere errors, following `raise ... from` causes; template errors marked
+  `permanent`) and fails such jobs on the first attempt. Rate limits, 5xx, timeouts and
+  connection errors are retried as before. `ProviderError` now carries the upstream
+  `status_code`. In a copy you have modified: a custom `JobQueue` needs the new
+  `retry: bool = True` parameter on `fail()`.
 - Fix: a non-streamed chat whose model or embedding provider failed (OpenAI down, a bad key,
   Ollama without the model) answered Starlette's plain-text `500 Internal Server Error`, with no
   `trace_id`, unlike every other error. Failures now answer JSON `{"detail", "trace_id"}` with

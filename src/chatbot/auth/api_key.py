@@ -19,7 +19,7 @@ from fastapi import HTTPException, Request, status
 
 from chatbot.auth.jwt import JwtVerifier, KeysUnavailable, TokenError, looks_like_jwt
 from chatbot.auth.principal import ANONYMOUS, Principal
-from chatbot.core.settings import AuthSection
+from chatbot.core.settings import AuthSection, ConfigError
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class Authenticator:
         raw = os.environ.get(cfg.api_keys_env, "")
         self.hashes = [h.strip().lower() for h in raw.split(",") if h.strip()]
         if self.mode == "api_key" and not self.hashes:
-            raise RuntimeError(
+            raise ConfigError(
                 f"auth.mode is api_key but {cfg.api_keys_env} is empty. "
                 "Run `chatbot hash-key` and set the hash, or set auth.mode: none for local use."
             )

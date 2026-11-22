@@ -269,4 +269,7 @@ every prompt, so a missing variable fails in CI.
 Add a handler in `ingestion/jobs/handlers.py` and enqueue it with `queue.enqueue(kind, payload)`.
 Include `user_id` in the payload when the job holds user data so `forget_user` deletes it. The
 worker gives every job its own trace (`job:<kind>`) and usage record, attributed to the
-payload's `user_id`.
+payload's `user_id`. A failed job is retried unless `chatbot.core.errors.is_permanent(exc)` says
+another attempt would fail the same way (4xx statuses other than 408/409/425/429, or a
+`ChatbotError` with `permanent = True`); raise your errors `from` the HTTP error, or set
+`permanent`, so the worker can tell. A custom `JobQueue` needs `fail(job_id, error, retry=True)`.

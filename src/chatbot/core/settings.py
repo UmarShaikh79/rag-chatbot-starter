@@ -7,6 +7,7 @@ with the exact path instead of silently using a default.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -542,6 +543,48 @@ class Settings(Strict):
     def reranker_profile(self) -> RerankerProfile:
         return self.catalog.rerankers[self.retrieval.rerank.model]
 
+    def required_credentials(self) -> dict[str, list[str]]:
+        """API-key env vars the configured models need, each with what needs it.
+
+        A profile's ``api_key_env`` names its key; OpenAI and Cohere profiles default to
+        OPENAI_API_KEY and COHERE_API_KEY. Local models (Ollama without a key, the offline
+        fakes, a local cross-encoder) need none.
+        """
+        default = {"openai": "OPENAI_API_KEY", "cohere": "COHERE_API_KEY"}
+        uses: list[tuple[str, Any]] = [
+            (f"models.answer ({self.models.answer})", self.llm_profile("answer")),
+            (f"models.cheap ({self.models.cheap})", self.llm_profile("cheap")),
+            (f"models.embed ({self.models.embed})", self.embed_profile()),
+        ]
+        if self.retrieval.rerank.enabled:
+            model = self.retrieval.rerank.model
+            uses.append((f"retrieval.rerank ({model})", self.reranker_profile()))
+        out: dict[str, list[str]] = {}
+        for what, profile in uses:
+            env = profile.api_key_env or default.get(profile.provider)
+            if env:
+                out.setdefault(env, []).append(what)
+        return out
+
+    def check_credentials(self, environ: Mapping[str, str] | None = None) -> None:
+        """Raise ConfigError naming every missing API key, before any client is built."""
+        environ = os.environ if environ is None else environ
+        missing = {
+            env: what
+            for env, what in self.required_credentials().items()
+            if not environ.get(env, "").strip()
+        }
+        if not missing:
+            return
+        profile = environ.get("CHATBOT_PROFILE") or "dev"
+        lines = [f"Missing API key(s) for the '{profile}' profile:"]
+        lines += [f"  {env}  needed by {', '.join(what)}" for env, what in missing.items()]
+        lines.append(
+            "Set them in .env (see .env.example), or run CHATBOT_PROFILE=offline, which needs "
+            "no key. An OpenAI-compatible server that needs no key still needs a non-empty value."
+        )
+        raise ConfigError("\n".join(lines))
+
     def source(self, name: str) -> SourceConfig:
         for s in self.ingestion.sources:
             if s.name == name:
@@ -551,7 +594,10 @@ class Settings(Strict):
     def database_url(self) -> str:
         url = os.environ.get(self.database.url_env)
         if not url:
-            raise RuntimeError(f"Set {self.database.url_env} to a Postgres URL")
+            raise ConfigError(
+                f"Set {self.database.url_env} to a Postgres URL "
+                "(postgresql://user:pass@host:5432/db; see .env.example)"
+            )
         return url
 
 

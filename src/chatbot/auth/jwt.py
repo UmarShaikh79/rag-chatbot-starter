@@ -29,7 +29,7 @@ import jwt
 from jwt import PyJWK
 
 from chatbot.auth.principal import Principal
-from chatbot.core.settings import JwtSection
+from chatbot.core.settings import ConfigError, JwtSection
 
 _MIN_REFRESH_S = 30.0  # never refetch the JWKS more often than this on unknown kids
 
@@ -70,9 +70,9 @@ class JwtVerifier:
         if cfg.hs256_secret_env:
             self.secret = os.environ.get(cfg.hs256_secret_env) or None
             if "HS256" in self.algorithms and not self.secret:
-                raise RuntimeError(f"auth.jwt.hs256_secret_env: {cfg.hs256_secret_env} is empty")
+                raise ConfigError(f"auth.jwt.hs256_secret_env: {cfg.hs256_secret_env} is empty")
             if self.secret is not None and len(self.secret) < 32:
-                raise RuntimeError("the HS256 secret must be at least 32 characters")
+                raise ConfigError("the HS256 secret must be at least 32 characters")
         self._keys: dict[str, PyJWK] = {}
         self._fetched_at = 0.0
         self._jwks_url = cfg.jwks_url

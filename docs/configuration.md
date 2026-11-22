@@ -43,6 +43,12 @@ Ollama tags were read from the Ollama library on 2026-11-22; choose ones that fi
 The OpenAI model IDs were taken from OpenAI's models page on 2026-11-21. Check them when you
 clone; only `models.yaml` needs to change.
 
+API keys are checked before anything starts. `chatbot serve`, `chatbot worker`, `eval`,
+`calibrate` and `ingest` list every key the configured models need and don't have (from each
+profile's `api_key_env`; OpenAI and Cohere default to `OPENAI_API_KEY` and `COHERE_API_KEY`)
+in one message and exit with code 2. `chatbot serve` also checks `DATABASE_URL`, the API-key
+hashes or JWT secret for `auth.mode`, and the Langfuse keys when Langfuse is on.
+
 ### `vector_store`
 
 | Key | Default | Notes |
@@ -94,6 +100,11 @@ any of these changes the chunker version, so the next sync re-chunks every docum
 
 `worker`: `concurrency`, `max_attempts` (retries with exponential backoff), `poll_interval_s`,
 `lock_timeout_s` (a job locked longer than this is assumed abandoned and claimed again).
+Permanent errors are not retried: a 4xx from a provider or source other than 408, 409, 425 and
+429 (a key without access to the model is 403, a wrong key 401), or an error the template marks
+permanent (unknown source, index built with another embedding model). The job fails on its first
+attempt with `last_error` saying why; fix the cause and enqueue it again. Rate limits, 5xx,
+timeouts and connection errors are retried as before.
 
 ### `retrieval`
 
