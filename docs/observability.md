@@ -154,8 +154,10 @@ or set `capture_text: false` or `send_user_id: false`.
 
 ## Cost and token accounting
 
-Fill in `price_per_mtok` for your models in `config/models.yaml` (USD per million tokens; they
-ship `null` because prices change). Then:
+Set `price_per_mtok` for your models in `config/models.yaml` (USD per million tokens). The
+OpenAI profiles ship with prices read from OpenAI's pricing page on the date noted in the file;
+check them, because prices change. Local models and the Cohere reranker ship without prices.
+Then:
 
 - every chat response has `usage.cost_usd`,
 - every chat turn, job and `ingest --inline` writes one `usage_records` row with totals and a

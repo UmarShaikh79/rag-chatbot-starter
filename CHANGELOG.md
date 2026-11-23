@@ -5,10 +5,16 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
-- Developer docs, part 3 ("Safety and users"): feature guides for guardrails, memory and
-  authentication, with real responses from the API (refusals, redaction, 401/403, a user's
-  facts and their deletion). The memory guide notes that `memory.backend` is not read: the
-  container always builds the Postgres store.
+- Developer docs, part 3: the remaining eight feature guides, for "Safety and users"
+  (guardrails, memory, authentication) and "Running it" (HTTP API, observability, usage and
+  cost, evals, deployment). Every feature now has a guide with the same nine sections. Their
+  examples are real responses from the running API and CLI: refusals, redaction, 401/403, a
+  user's facts and their deletion, usage reports, an eval run and a failing gate. Doc fixes
+  found while writing them: `docs/api.md` said every error body carries `trace_id`, but 422
+  validation errors use FastAPI's own body (the trace ID is in the `X-Trace-Id` header);
+  `docs/observability.md` said all model prices ship empty, but the OpenAI profiles have
+  prices. The memory guide notes that `memory.backend` is not read: the container always
+  builds the Postgres store.
 - Developer docs, part 2: feature guides for "Finding answers" (embeddings, vector stores,
   retrieval strategies, reranking, weak retrieval and calibration) and "Answering" (models and
   providers, prompts, answers and streaming, orchestration), with the same nine sections as the
