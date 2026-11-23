@@ -62,10 +62,23 @@ know where to look:
 | [Answers and streaming](features/answers-and-streaming.md) | Citations, abstaining, output checks, and the SSE draft/final contract. |
 | [Orchestration](features/orchestration.md) | The steps of a chat turn, `TurnState`, the LangGraph adapter; changing or adding steps. |
 
-Coming next, in this order: **Safety and users** (guardrails, memory,
-authentication) and **Running it** (the HTTP API, observability, usage and cost, evals,
-deployment). Until then, [configuration](configuration.md) and [extending](extending.md) cover
-those features.
+**Safety and users**
+
+| Guide | Covers |
+| --- | --- |
+| [Guardrails](features/guardrails.md) | Input, context and output checks: PII redaction (regex, Presidio), prompt injection, prompt leaks, groundedness; adding detectors and guards. |
+| [Memory](features/memory.md) | History, rolling summaries and long-term facts; what is stored, redaction, forgetting a user; swapping the store. |
+| [Authentication](features/authentication.md) | API keys and JWT/OIDC tokens, end users versus backends, admin scope; mapping claims. |
+
+**Running it**
+
+| Guide | Covers |
+| --- | --- |
+| [HTTP API](features/http-api.md) | The app factory, routes, trace IDs, JSON errors, CORS; adding a route. |
+| [Observability](features/observability.md) | Logs, trace IDs, OpenTelemetry and Langfuse; the tracing facade; adding spans and metrics. |
+| [Usage and cost](features/usage-and-cost.md) | Token and cost accounting per call and per operation, prices, reports; budgets. |
+| [Evals](features/evals.md) | The golden set, metrics, the CI gate and baselines; writing your own questions. |
+| [Deployment](features/deployment.md) | The image, Docker Compose, the Kubernetes example, a production checklist. |
 
 ## Reference
 

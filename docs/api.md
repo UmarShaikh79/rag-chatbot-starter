@@ -28,7 +28,8 @@ code: use a JWT from your identity provider, or call the API from your own backe
 
 Errors return `{"detail": "...", "trace_id": "..."}`: 401 bad key or token, 403 conversation
 owned by another user (or a JWT user reaching for another user or an admin route), 404 unknown
-source/job/document/fact, 409 index built with a different embedding model, 422 invalid body,
+source/job/document/fact, 409 index built with a different embedding model, 422 invalid body
+(FastAPI's own body: `detail` is a list of field errors, and the trace ID is only in the header),
 500 something failed inside the service (`detail` is the template's own message, or
 `internal error`), 502 a model, embedding or rerank provider failed after its retries
 (`detail` says which kind; SDK messages are not repeated because they can contain part of an
