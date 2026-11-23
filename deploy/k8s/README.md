@@ -34,7 +34,7 @@ To use OpenAI there, set `CHATBOT_PROFILE=dev` in its `configMapGenerator` and
 ## Production
 
 1. Build and push an image with the extras you use:
-   `docker build -f docker/Dockerfile --build-arg UV_EXTRAS="--extra otel" -t ghcr.io/you/chatbot:0.5.0 .`
+   `docker build -f docker/Dockerfile --build-arg UV_EXTRAS="--extra otel" -t ghcr.io/you/chatbot:0.6.0 .`
 2. Edit `overlays/prod`: the image name and tag, the ingress host (`chatbot.example.com` in
    `ingress.yaml`, twice), and any `CHATBOT__...` settings in the `configMapGenerator`.
 3. Create the database (Postgres with pgvector >= 0.8; Cloud SQL, RDS, Azure Database for

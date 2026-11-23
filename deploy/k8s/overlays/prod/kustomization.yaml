@@ -21,7 +21,7 @@ resources:
 images:
   - name: chatbot
     newName: ghcr.io/YOUR_ORG/rag-chatbot-starter
-    newTag: "0.5.0"
+    newTag: "0.6.0"
 
 patches:
   - target: {kind: Deployment, name: chatbot-api}
