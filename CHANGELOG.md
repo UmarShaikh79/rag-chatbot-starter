@@ -5,6 +5,15 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.6.0 (2026-11-23): tested, hardened and documented
+
+Everything found by running the template against real services (OpenAI, Ollama, Qdrant,
+Cohere, Keycloak, Langfuse, OpenTelemetry, kind) is fixed, the code was made easier to read,
+every feature has a developer guide, and the license is now Apache 2.0. No setting was removed
+and no migration was added; to upgrade a copy, take the fixes below that apply to you.
+
 - Developer docs, part 3: the remaining eight feature guides, for "Safety and users"
   (guardrails, memory, authentication) and "Running it" (HTTP API, observability, usage and
   cost, evals, deployment). Every feature now has a guide with the same nine sections. Their
