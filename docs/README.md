@@ -62,8 +62,15 @@ know where to look:
 | [Answers and streaming](features/answers-and-streaming.md) | Citations, abstaining, output checks, and the SSE draft/final contract. |
 | [Orchestration](features/orchestration.md) | The steps of a chat turn, `TurnState`, the LangGraph adapter; changing or adding steps. |
 
-Coming next, in this order: **Safety and users** (guardrails, memory,
-authentication) and **Running it** (the HTTP API, observability, usage and cost, evals,
+**Safety and users**
+
+| Guide | Covers |
+| --- | --- |
+| [Guardrails](features/guardrails.md) | Input, context and output checks: PII redaction (regex, Presidio), prompt injection, prompt leaks, groundedness; adding detectors and guards. |
+| [Memory](features/memory.md) | History, rolling summaries and long-term facts; what is stored, redaction, forgetting a user; swapping the store. |
+| [Authentication](features/authentication.md) | API keys and JWT/OIDC tokens, end users versus backends, admin scope; mapping claims. |
+
+Coming next: **Running it** (the HTTP API, observability, usage and cost, evals,
 deployment). Until then, [configuration](configuration.md) and [extending](extending.md) cover
 those features.
 

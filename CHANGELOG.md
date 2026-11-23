@@ -5,6 +5,10 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Developer docs, part 3 ("Safety and users"): feature guides for guardrails, memory and
+  authentication, with real responses from the API (refusals, redaction, 401/403, a user's
+  facts and their deletion). The memory guide notes that `memory.backend` is not read: the
+  container always builds the Postgres store.
 - Developer docs, part 2: feature guides for "Finding answers" (embeddings, vector stores,
   retrieval strategies, reranking, weak retrieval and calibration) and "Answering" (models and
   providers, prompts, answers and streaming, orchestration), with the same nine sections as the
