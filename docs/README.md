@@ -53,8 +53,16 @@ know where to look:
 | [Reranking](features/reranking.md) | Cohere, a local cross-encoder and the lexical reranker; retries, fallback and cost. |
 | [Weak retrieval and calibration](features/weak-retrieval-and-calibration.md) | When the bot answers or asks; the gate score; `chatbot calibrate` and its thresholds. |
 
-Coming next, in this order: **Answering** (models and providers,
-prompts, answers and streaming, orchestration), **Safety and users** (guardrails, memory,
+**Answering**
+
+| Guide | Covers |
+| --- | --- |
+| [Models and providers](features/models-and-providers.md) | The `answer` and `cheap` roles; OpenAI, OpenAI-compatible servers, Ollama and the offline fake; adding a provider. |
+| [Prompts](features/prompts.md) | The versioned YAML prompts, strict rendering, changing wording safely, structured output. |
+| [Answers and streaming](features/answers-and-streaming.md) | Citations, abstaining, output checks, and the SSE draft/final contract. |
+| [Orchestration](features/orchestration.md) | The steps of a chat turn, `TurnState`, the LangGraph adapter; changing or adding steps. |
+
+Coming next, in this order: **Safety and users** (guardrails, memory,
 authentication) and **Running it** (the HTTP API, observability, usage and cost, evals,
 deployment). Until then, [configuration](configuration.md) and [extending](extending.md) cover
 those features.
