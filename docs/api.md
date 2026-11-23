@@ -68,9 +68,9 @@ Response (`ChatResponse`):
 | `usage` | `prompt_tokens`, `completion_tokens`, `embedding_tokens`, `cost_usd` (null unless prices are set) |
 | `warnings` | e.g. `pii:EMAIL` when the question was redacted before use, `injection:override_instructions` or `prompt_leak` with a refusal, `rerank_unavailable` when the reranker failed and retrieval order was used |
 
-Filters: `document_id` (string or list) matches documents; every other key must equal the
-chunk metadata value (`source`, `title`, `heading`, `page`, `uri`, or any metadata you attached
-to inline documents).
+Metadata keys you can filter on: `source`, `title`, `heading`, `page`, `uri`, and any
+metadata you attached to documents (front matter, SQL columns, inline `metadata`), matched as
+described above.
 
 ## Streaming contract (ADR 014)
 

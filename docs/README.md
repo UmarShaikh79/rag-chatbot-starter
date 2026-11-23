@@ -43,9 +43,26 @@ know where to look:
 | [Background jobs and the worker](features/background-jobs.md) | The Postgres job queue, the worker, retries, job kinds, running jobs from the CLI. |
 | [Re-indexing and aliases](features/reindexing.md) | Changing the embedding model, chunker or store safely; aliases, switching and rolling back. |
 
-Coming next, in this order: **Finding answers** (embeddings, vector stores, retrieval
-strategies, reranking, weak retrieval and calibration), **Answering** (models and providers,
-prompts, answers and streaming, orchestration), **Safety and users** (guardrails, memory,
+**Finding answers**
+
+| Guide | Covers |
+| --- | --- |
+| [Embeddings](features/embeddings.md) | OpenAI, Ollama and the offline hashing embedder; profiles, dims, prefixes; adding a provider. |
+| [Vector stores](features/vector-stores.md) | pgvector and Qdrant, the shared Postgres catalog, filters, HNSW and exact scans; adding a store. |
+| [Retrieval strategies](features/retrieval-strategies.md) | Dense, BM25 and hybrid (RRF); query rewrite and HyDE; adding a retriever. |
+| [Reranking](features/reranking.md) | Cohere, a local cross-encoder and the lexical reranker; retries, fallback and cost. |
+| [Weak retrieval and calibration](features/weak-retrieval-and-calibration.md) | When the bot answers or asks; the gate score; `chatbot calibrate` and its thresholds. |
+
+**Answering**
+
+| Guide | Covers |
+| --- | --- |
+| [Models and providers](features/models-and-providers.md) | The `answer` and `cheap` roles; OpenAI, OpenAI-compatible servers, Ollama and the offline fake; adding a provider. |
+| [Prompts](features/prompts.md) | The versioned YAML prompts, strict rendering, changing wording safely, structured output. |
+| [Answers and streaming](features/answers-and-streaming.md) | Citations, abstaining, output checks, and the SSE draft/final contract. |
+| [Orchestration](features/orchestration.md) | The steps of a chat turn, `TurnState`, the LangGraph adapter; changing or adding steps. |
+
+Coming next, in this order: **Safety and users** (guardrails, memory,
 authentication) and **Running it** (the HTTP API, observability, usage and cost, evals,
 deployment). Until then, [configuration](configuration.md) and [extending](extending.md) cover
 those features.

@@ -5,6 +5,12 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Developer docs, part 2: feature guides for "Finding answers" (embeddings, vector stores,
+  retrieval strategies, reranking, weak retrieval and calibration) and "Answering" (models and
+  providers, prompts, answers and streaming, orchestration), with the same nine sections as the
+  first four and real outputs from the offline profile. `docs/configuration.md` now says the
+  golden set has 35 questions; `docs/api.md` no longer describes metadata filters twice with
+  two different rules.
 - Developer docs, part 1: a docs home by reader (`docs/README.md`); an architecture tour
   (Protocols, the registry, the container, one chat request and one document through the code);
   a glossary; a tutorial that adds a retriever end to end (its code is run by
