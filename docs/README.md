@@ -43,8 +43,17 @@ know where to look:
 | [Background jobs and the worker](features/background-jobs.md) | The Postgres job queue, the worker, retries, job kinds, running jobs from the CLI. |
 | [Re-indexing and aliases](features/reindexing.md) | Changing the embedding model, chunker or store safely; aliases, switching and rolling back. |
 
-Coming next, in this order: **Finding answers** (embeddings, vector stores, retrieval
-strategies, reranking, weak retrieval and calibration), **Answering** (models and providers,
+**Finding answers**
+
+| Guide | Covers |
+| --- | --- |
+| [Embeddings](features/embeddings.md) | OpenAI, Ollama and the offline hashing embedder; profiles, dims, prefixes; adding a provider. |
+| [Vector stores](features/vector-stores.md) | pgvector and Qdrant, the shared Postgres catalog, filters, HNSW and exact scans; adding a store. |
+| [Retrieval strategies](features/retrieval-strategies.md) | Dense, BM25 and hybrid (RRF); query rewrite and HyDE; adding a retriever. |
+| [Reranking](features/reranking.md) | Cohere, a local cross-encoder and the lexical reranker; retries, fallback and cost. |
+| [Weak retrieval and calibration](features/weak-retrieval-and-calibration.md) | When the bot answers or asks; the gate score; `chatbot calibrate` and its thresholds. |
+
+Coming next, in this order: **Answering** (models and providers,
 prompts, answers and streaming, orchestration), **Safety and users** (guardrails, memory,
 authentication) and **Running it** (the HTTP API, observability, usage and cost, evals,
 deployment). Until then, [configuration](configuration.md) and [extending](extending.md) cover

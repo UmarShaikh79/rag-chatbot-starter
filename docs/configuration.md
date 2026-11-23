@@ -153,7 +153,7 @@ logs that thresholds are provisional until you run `chatbot calibrate --apply` a
 Hosted rerankers can be rate-limited. Cohere retries 429, 5xx, timeouts and connection errors:
 twice within about 1.5 s in a chat turn (then `rerank.fallback` applies), and with backoff for
 up to about 3 minutes in `chatbot calibrate` and `chatbot eval`, which never fall back. A Cohere
-trial key allows 10 rerank calls a minute, so calibrating on the 34-question golden set takes a
+trial key allows 10 rerank calls a minute, so calibrating on the 35-question golden set takes a
 few minutes, and a chat service on a trial key falls back whenever traffic passes 10 turns a
 minute; use a production key for real traffic. Keep the retriever calibrated too (run
 `chatbot calibrate --apply` once with `rerank.enabled: false`): a fallback turn is gated with

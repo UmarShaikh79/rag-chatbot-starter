@@ -5,6 +5,10 @@ matters, how to bring the change into a copy you have already modified.
 
 ## Unreleased
 
+- Developer docs, part 2 ("Finding answers"): feature guides for embeddings, vector stores,
+  retrieval strategies, reranking, and weak retrieval and calibration, with the same nine
+  sections as the first four and real outputs from the offline profile. `docs/configuration.md`
+  now says the golden set has 35 questions.
 - Developer docs, part 1: a docs home by reader (`docs/README.md`); an architecture tour
   (Protocols, the registry, the container, one chat request and one document through the code);
   a glossary; a tutorial that adds a retriever end to end (its code is run by
